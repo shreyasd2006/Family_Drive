@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const { protect } = require('../middleware/auth');
 const User = require('../models/User');
+const Household = require('../models/Household');
 const Document = require('../models/Document');
 const Asset = require('../models/Asset');
 const Bill = require('../models/Bill');
@@ -10,68 +11,71 @@ const EmergencyContact = require('../models/EmergencyContact');
 
 // Get all data for the dashboard
 router.get('/data', protect, async (req, res) => {
-  try {
-    const householdId = req.user.household;
+    try {
+        const householdId = req.user.household;
 
-    const users = await User.find({ household: householdId }).select('-password');
-    // Transform users to match frontend expected format {id, name, avatar}
-    const formattedUsers = users.map(u => ({
-        id: u._id.toString(),
-        name: u.name,
-        avatar: u.avatar
-    }));
+        const household = await Household.findById(householdId); // Fetch household details
 
-    // Add a 'family' user for shared items if not explicitly in DB
-    formattedUsers.push({ id: 'family', name: 'Family', avatar: '🏠' });
+        const users = await User.find({ household: householdId }).select('-password');
+        // Transform users to match frontend expected format {id, name, avatar}
+        const formattedUsers = users.map(u => ({
+            id: u._id.toString(),
+            name: u.name,
+            avatar: u.avatar
+        }));
 
-    const docs = await Document.find({ householdId });
-    // Map _id to id
-    const formattedDocs = docs.map(d => ({
-        ...d._doc,
-        id: d._id.toString()
-    }));
+        // Add a 'family' user for shared items if not explicitly in DB
+        formattedUsers.push({ id: 'family', name: 'Family', avatar: '🏠' });
 
-    const assets = await Asset.find({ householdId });
-    const formattedAssets = assets.map(a => ({
-        ...a._doc,
-        id: a._id.toString()
-    }));
+        const docs = await Document.find({ householdId });
+        // Map _id to id
+        const formattedDocs = docs.map(d => ({
+            ...d._doc,
+            id: d._id.toString()
+        }));
 
-    const bills = await Bill.find({ householdId });
-    const formattedBills = bills.map(b => ({
-        ...b._doc,
-        id: b._id.toString()
-    }));
+        const assets = await Asset.find({ householdId });
+        const formattedAssets = assets.map(a => ({
+            ...a._doc,
+            id: a._id.toString()
+        }));
 
-    const health = await Health.find({ householdId });
-    const formattedHealth = health.map(h => ({
-        ...h._doc,
-        id: h._id.toString()
-    }));
+        const bills = await Bill.find({ householdId });
+        const formattedBills = bills.map(b => ({
+            ...b._doc,
+            id: b._id.toString()
+        }));
 
-    const contacts = await EmergencyContact.find({ householdId });
+        const health = await Health.find({ householdId });
+        const formattedHealth = health.map(h => ({
+            ...h._doc,
+            id: h._id.toString()
+        }));
 
-    // We need insurance info. Let's assume it's stored as a document or a setting.
-    // For now, I'll hardcode or maybe store it in Household model.
-    // I will return a placeholder or fetch a specific doc tagged 'insurance'
-    const insuranceDoc = formattedDocs.find(d => d.type.toLowerCase().includes('insurance'));
-    const insurance = insuranceDoc ? insuranceDoc.number : 'No Insurance Record Found';
+        const contacts = await EmergencyContact.find({ householdId });
 
-    res.json({
-        users: formattedUsers,
-        docs: formattedDocs,
-        assets: formattedAssets,
-        bills: formattedBills,
-        health: formattedHealth,
-        emergency: {
-            contacts,
-            insurance
-        }
-    });
+        // We need insurance info. Let's assume it's stored as a document or a setting.
+        // For now, I'll hardcode or maybe store it in Household model.
+        // I will return a placeholder or fetch a specific doc tagged 'insurance'
+        const insuranceDoc = formattedDocs.find(d => d.type.toLowerCase().includes('insurance'));
+        const insurance = insuranceDoc ? insuranceDoc.number : 'No Insurance Record Found';
 
-  } catch (error) {
-    res.status(500).json({ message: error.message });
-  }
+        res.json({
+            householdName: household ? household.name : 'My Household',
+            users: formattedUsers,
+            docs: formattedDocs,
+            assets: formattedAssets,
+            bills: formattedBills,
+            health: formattedHealth,
+            emergency: {
+                contacts,
+                insurance
+            }
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
 });
 
 // Generic CRUD handlers could be useful, but let's be explicit for clarity.

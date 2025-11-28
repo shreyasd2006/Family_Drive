@@ -18,8 +18,18 @@ import {
   Loader2,
   LogOut,
   Plus,
-  Trash2
+  Trash2,
+  MapPin,
+  ScanLine,
+  Upload,
+  RefreshCw,
+  X
 } from 'lucide-react';
+import { createWorker } from 'tesseract.js';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 import { format, addDays, differenceInDays, isPast, parseISO } from 'date-fns';
 import api from '../api';
 import { useAuth } from '../context/AuthContext';
@@ -35,16 +45,27 @@ export default function Dashboard() {
     assets: [],
     bills: [],
     health: [],
-    emergency: { contacts: [], insurance: '' }
+    emergency: { contacts: [], insurance: '' },
+    householdName: ''
   });
   const [loading, setLoading] = useState(true);
   const [activeUser, setActiveUser] = useState(null);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchOverlay, setShowSearchOverlay] = useState(true);
+  const [isNotificationsOpen, setNotificationsOpen] = useState(false);
   const [isSOSOpen, setSOSOpen] = useState(false);
   const [isQuickAddOpen, setQuickAddOpen] = useState(false);
   const [travelMode, setTravelMode] = useState(false);
-  const [addType, setAddType] = useState(null); // 'doc', 'asset', 'bill', 'health'
+  const [zoomLevel, setZoomLevel] = useState(1);
+  const [addType, setAddType] = useState(null); // 'doc', 'asset', 'bill', 'health', 'scan'
+
+  // OCR State
+  const [isScanning, setIsScanning] = useState(false);
+  const [scanStep, setScanStep] = useState('upload'); // 'upload', 'processing', 'review'
+  const [scannedImage, setScannedImage] = useState(null);
+  const [scanProgress, setScanProgress] = useState(0);
+  const [scanResult, setScanResult] = useState(null);
 
   // Form States
   const [formData, setFormData] = useState({});
@@ -54,9 +75,9 @@ export default function Dashboard() {
       .then(res => {
         setData(res.data);
         if (!activeUser && res.data.users.length > 0) {
-            // Try to set activeUser to the current logged in user if exists in list
-            const me = res.data.users.find(u => u.id === currentUser._id);
-            setActiveUser(me || res.data.users[0]);
+          // Try to set activeUser to the current logged in user if exists in list
+          const me = res.data.users.find(u => u.id === currentUser._id);
+          setActiveUser(me || res.data.users[0]);
         }
         setLoading(false);
       })
@@ -70,45 +91,135 @@ export default function Dashboard() {
     fetchData();
   }, []);
 
+  useEffect(() => {
+    if (searchQuery) {
+      setShowSearchOverlay(true);
+    }
+  }, [searchQuery]);
+
   const handleDelete = async (type, id) => {
-      if (!window.confirm('Are you sure you want to delete this item?')) return;
-      try {
-          await api.delete(`/${type}/${id}`);
-          fetchData();
-      } catch (err) {
-          alert('Failed to delete');
-      }
+    if (!window.confirm('Are you sure you want to delete this item?')) return;
+    try {
+      await api.delete(`/${type}/${id}`);
+      fetchData();
+    } catch (err) {
+      alert('Failed to delete');
+    }
   };
 
   const handleAddSubmit = async (e) => {
-      e.preventDefault();
-      try {
-          // Add userId to formData based on activeUser or current User
-          // If activeUser is 'family' or a user, we should probably let the user select?
-          // For now, let's assume it belongs to the 'activeUser' selected in the dashboard or the logged in user.
-          // The backend expects 'userId'.
+    e.preventDefault();
+    try {
+      // Add userId to formData based on activeUser or current User
+      // If activeUser is 'family' or a user, we should probably let the user select?
+      // For now, let's assume it belongs to the 'activeUser' selected in the dashboard or the logged in user.
+      // The backend expects 'userId'.
 
-          const payload = { ...formData };
-          if (activeUser) {
-              payload.userId = activeUser.id === 'family' ? 'family' : activeUser.id;
-          } else {
-              payload.userId = currentUser._id;
-          }
-
-          let endpoint = '';
-          if (addType === 'doc') endpoint = '/documents';
-          if (addType === 'asset') endpoint = '/assets';
-          if (addType === 'bill') endpoint = '/bills';
-          if (addType === 'health') endpoint = '/health';
-
-          await api.post(endpoint, payload);
-          setQuickAddOpen(false);
-          setAddType(null);
-          setFormData({});
-          fetchData();
-      } catch (err) {
-          alert('Failed to add item: ' + err.message);
+      const payload = { ...formData };
+      if (!payload.userId) {
+        payload.userId = currentUser._id;
       }
+
+      let endpoint = '';
+      if (addType === 'doc') endpoint = '/documents';
+      if (addType === 'asset') endpoint = '/assets';
+      if (addType === 'bill') endpoint = '/bills';
+      if (addType === 'health') endpoint = '/health';
+
+      await api.post(endpoint, payload);
+      setQuickAddOpen(false);
+      setAddType(null);
+      setFormData({});
+      fetchData();
+    } catch (err) {
+      alert('Failed to add item: ' + err.message);
+    }
+  };
+
+
+  // OCR Logic
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setScanStep('processing');
+    setIsScanning(true);
+    setScanProgress(0);
+
+    try {
+      let imageUrl = '';
+
+      if (file.type === 'application/pdf') {
+        // Convert PDF to Image
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        await page.render({ canvasContext: context, viewport: viewport }).promise;
+        imageUrl = canvas.toDataURL('image/png');
+      } else {
+        imageUrl = URL.createObjectURL(file);
+      }
+
+      // Perform OCR
+      const worker = await createWorker('eng');
+      const { data: { text } } = await worker.recognize(imageUrl);
+      await worker.terminate();
+
+      const lines = text.split('\n').filter(line => line.trim() !== '');
+
+      // Attempt to find title
+      const titleGuess = lines[0] || 'Untitled Scan';
+
+      // Attempt to find date
+      const dateRegex = /(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})|(\d{4}[-/]\d{1,2}[-/]\d{1,2})/;
+      const dateMatch = text.match(dateRegex);
+      let dateGuess = '';
+      if (dateMatch) {
+        const parsedDate = new Date(dateMatch[0]);
+        if (!isNaN(parsedDate.getTime())) {
+          dateGuess = parsedDate.toISOString().split('T')[0];
+        }
+      }
+
+      // Attempt to find amount (for bills)
+      const amountRegex = /[\$£€₹]\s?(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)/;
+      const amountMatch = text.match(amountRegex);
+      const amountGuess = amountMatch ? amountMatch[1].replace(/,/g, '') : '';
+
+      setFormData({
+        title: titleGuess,
+        date: dateGuess,
+        amount: amountGuess,
+        userId: currentUser._id, // Default to personal
+        typeSelector: 'doc' // Default type
+      });
+
+      setScanResult(text);
+      setScanStep('review');
+      setIsScanning(false);
+
+    } catch (err) {
+      console.error(err);
+      alert('Scan failed: ' + err.message);
+      setScanStep('upload');
+      setIsScanning(false);
+    }
+  };
+
+  const handleScanAccept = () => {
+    // Determine type and save
+    if (formData.typeSelector) {
+      setAddType(formData.typeSelector);
+    } else {
+      setAddType('doc');
+    }
+    // Form data is already set, just switching view to the specific add form
+    // The user can then review and hit save
   };
 
   const filteredDocs = useMemo(() => {
@@ -120,16 +231,39 @@ export default function Dashboard() {
     if (travelMode) {
       docs = docs.filter(d => d.tags && d.tags.includes('travel'));
     }
-    return docs;
-  }, [data.docs, activeUser, searchQuery, travelMode]);
+    // Sort: Personal first, then Family
+    return docs.sort((a, b) => {
+      if (a.userId === currentUser._id && b.userId !== currentUser._id) return -1;
+      if (a.userId !== currentUser._id && b.userId === currentUser._id) return 1;
+      return 0;
+    });
+  }, [data.docs, activeUser, searchQuery, travelMode, currentUser._id]);
 
   const filteredAssets = useMemo(() => {
-    return data.assets.filter(a => a.title.toLowerCase().includes(searchQuery.toLowerCase()));
-  }, [data.assets, searchQuery]);
+    if (!activeUser) return [];
+    let assets = data.assets.filter(a =>
+      (a.userId === activeUser.id || activeUser.id === 'family' || a.userId === 'family') &&
+      a.title.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    return assets.sort((a, b) => {
+      if (a.userId === currentUser._id && b.userId !== currentUser._id) return -1;
+      if (a.userId !== currentUser._id && b.userId === currentUser._id) return 1;
+      return 0;
+    });
+  }, [data.assets, searchQuery, activeUser, currentUser._id]);
 
   const filteredBills = useMemo(() => {
-    return data.bills.filter(b => b.title.toLowerCase().includes(searchQuery.toLowerCase()));
-  }, [data.bills, searchQuery]);
+    if (!activeUser) return [];
+    let bills = data.bills.filter(b =>
+      (b.user === activeUser.id || activeUser.id === 'family' || b.user === 'family') && // Note: Bill uses 'user' field in schema, check if consistent
+      b.title.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+    return bills.sort((a, b) => {
+      if (a.user === currentUser._id && b.user !== currentUser._id) return -1;
+      if (a.user !== currentUser._id && b.user === currentUser._id) return 1;
+      return 0;
+    });
+  }, [data.bills, searchQuery, activeUser, currentUser._id]);
 
   const urgentItems = useMemo(() => {
     const today = new Date();
@@ -146,7 +280,7 @@ export default function Dashboard() {
       if (a.warrantyExpiry) {
         const days = differenceInDays(parseISO(a.warrantyExpiry), today);
         if (days <= 45 && days > 0) {
-            alerts.push({ type: 'warranty', title: a.title, msg: `Warranty expires in ${days} days`, days });
+          alerts.push({ type: 'warranty', title: a.title, msg: `Warranty expires in ${days} days`, days });
         }
       }
     });
@@ -170,12 +304,16 @@ export default function Dashboard() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {urgentItems.length > 0 ? urgentItems.map((item, i) => (
-            <div key={i} className="flex items-start gap-3 bg-white p-4 rounded-xl border border-stone-100 shadow-sm hover:shadow-md transition-shadow">
-              <div className={`p-2 rounded-full ${item.type === 'bill' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'}`}>
+            <div
+              key={i}
+              onClick={() => setActiveTab(item.type === 'bill' ? 'finance' : 'assets')}
+              className="flex items-start gap-3 bg-white p-4 rounded-xl border border-stone-100 shadow-sm hover:shadow-md transition-all cursor-pointer hover:border-teal-500/30 group"
+            >
+              <div className={`p-2 rounded-full ${item.type === 'bill' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'} group-hover:scale-110 transition-transform`}>
                 {item.type === 'bill' ? <CreditCard size={18} /> : <ShieldCheck size={18} />}
               </div>
               <div>
-                <h4 className="font-medium text-stone-800 text-sm">{item.title}</h4>
+                <h4 className="font-medium text-stone-800 text-sm group-hover:text-teal-700 transition-colors">{item.title}</h4>
                 <p className="text-xs text-stone-500">{item.msg}</p>
               </div>
             </div>
@@ -221,17 +359,13 @@ export default function Dashboard() {
 
         <div className="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm flex flex-col justify-center gap-3">
           <h3 className="font-semibold text-stone-700 mb-2">Quick Actions</h3>
-          <button onClick={() => { setQuickAddOpen(true); setAddType('doc'); }} className="w-full text-left px-4 py-3 rounded-xl bg-stone-50 hover:bg-stone-100 transition-colors flex items-center gap-3 text-sm text-stone-600 font-medium group">
-            <div className="bg-white p-1.5 rounded-lg shadow-sm group-hover:scale-110 transition-transform"><Files size={16} className="text-teal-600" /></div>
-            Upload Document
+          <button onClick={() => { setQuickAddOpen(true); setAddType(null); setFormData({ userId: currentUser._id }); }} className="w-full text-left px-4 py-3 rounded-xl bg-stone-50 hover:bg-stone-100 transition-colors flex items-center gap-3 text-sm text-stone-600 font-medium group">
+            <div className="bg-white p-1.5 rounded-lg shadow-sm group-hover:scale-110 transition-transform"><Plus size={16} className="text-teal-600" /></div>
+            Add New Item
           </button>
-          <button onClick={() => { setQuickAddOpen(true); setAddType('bill'); }} className="w-full text-left px-4 py-3 rounded-xl bg-stone-50 hover:bg-stone-100 transition-colors flex items-center gap-3 text-sm text-stone-600 font-medium group">
-            <div className="bg-white p-1.5 rounded-lg shadow-sm group-hover:scale-110 transition-transform"><CreditCard size={16} className="text-rose-500" /></div>
-            Log Expense
-          </button>
-          <button onClick={() => { setQuickAddOpen(true); setAddType('asset'); }} className="w-full text-left px-4 py-3 rounded-xl bg-stone-50 hover:bg-stone-100 transition-colors flex items-center gap-3 text-sm text-stone-600 font-medium group">
-            <div className="bg-white p-1.5 rounded-lg shadow-sm group-hover:scale-110 transition-transform"><Armchair size={16} className="text-amber-500" /></div>
-            Add Asset
+          <button onClick={() => { setQuickAddOpen(true); setAddType('scan'); setScanStep('upload'); setFormData({ userId: currentUser._id }); }} className="w-full text-left px-4 py-3 rounded-xl bg-stone-50 hover:bg-stone-100 transition-colors flex items-center gap-3 text-sm text-stone-600 font-medium group">
+            <div className="bg-white p-1.5 rounded-lg shadow-sm group-hover:scale-110 transition-transform"><ScanLine size={16} className="text-teal-600" /></div>
+            Smart Scan Document/Bill
           </button>
         </div>
       </div>
@@ -239,7 +373,7 @@ export default function Dashboard() {
   );
 
   const renderVault = () => (
-    <div className="space-y-6 animate-in fade-in duration-300">
+    <div className="space-y-6 animate-in fade-in duration-300 mt-6">
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
           <h2 className="text-2xl font-serif text-stone-800">
@@ -271,15 +405,20 @@ export default function Dashboard() {
               {isExpired && (
                 <div className="absolute top-0 right-0 bg-rose-100 text-rose-700 text-[10px] font-bold px-2 py-1 rounded-bl-lg">EXPIRED</div>
               )}
+              {doc.userId === 'family' && (
+                <div className={`absolute top-0 ${daysLeft < 45 || isExpired ? 'right-24' : 'right-0'} bg-indigo-50 text-indigo-600 text-[10px] font-bold px-2 py-1 rounded-bl-lg border-l border-b border-indigo-100 flex items-center gap-1`}>
+                  <Users size={10} /> FAMILY
+                </div>
+              )}
 
               <div className="flex justify-between items-start mb-4">
                 <div className="p-2 bg-stone-50 rounded-lg text-stone-400 group-hover:text-teal-600 transition-colors">
                   <Files size={20} />
                 </div>
                 <div className="flex gap-1">
-                   {doc.tags.map(t => <span key={t} className="text-[10px] uppercase tracking-wider text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded-md">{t}</span>)}
+                  {doc.tags.map(t => <span key={t} className="text-[10px] uppercase tracking-wider text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded-md">{t}</span>)}
                 </div>
-                <button onClick={() => handleDelete('documents', doc.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={14}/></button>
+                <button onClick={() => handleDelete('documents', doc.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={14} /></button>
               </div>
 
               <h3 className="font-medium text-stone-800">{doc.title}</h3>
@@ -289,10 +428,10 @@ export default function Dashboard() {
 
               <div className="flex flex-col gap-1 text-xs text-stone-500 pt-3 border-t border-stone-100">
                 {doc.expiry && (
-                   <div className="flex items-center gap-1.5">
-                     <Clock size={12} />
-                     <span>Expires: <span className={isExpired ? 'text-rose-600 font-medium' : ''}>{format(parseISO(doc.expiry), 'MMM dd, yyyy')}</span></span>
-                   </div>
+                  <div className="flex items-center gap-1.5">
+                    <Clock size={12} />
+                    <span>Expires: <span className={isExpired ? 'text-rose-600 font-medium' : ''}>{format(parseISO(doc.expiry), 'MMM dd, yyyy')}</span></span>
+                  </div>
                 )}
                 <div className="flex items-center gap-1.5">
                   <MapPin size={12} />
@@ -317,20 +456,20 @@ export default function Dashboard() {
 
       <div className="grid grid-cols-1 gap-4">
         {filteredAssets.map(asset => {
-           const daysLeft = asset.warrantyExpiry ? differenceInDays(parseISO(asset.warrantyExpiry), new Date()) : 999;
+          const daysLeft = asset.warrantyExpiry ? differenceInDays(parseISO(asset.warrantyExpiry), new Date()) : 999;
 
-           return (
+          return (
             <div key={asset.id} className="bg-white rounded-xl border border-stone-200 p-6 flex flex-col lg:flex-row gap-6">
               <div className="flex-1">
                 <div className="flex items-center justify-between mb-2">
-                   <div className="flex items-center gap-3">
-                     <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg"><Armchair size={20} /></div>
-                     <h3 className="font-semibold text-stone-800 text-lg">{asset.title}</h3>
-                   </div>
-                   <div className="flex items-center gap-2">
-                     <StatusBadge type={daysLeft < 0 ? 'neutral' : daysLeft < 45 ? 'warning' : 'success'} text={daysLeft < 0 ? 'Warranty Expired' : `Warranty: ${daysLeft} days left`} />
-                     <button onClick={() => handleDelete('assets', asset.id)} className="text-stone-300 hover:text-rose-500 ml-2"><Trash2 size={16}/></button>
-                   </div>
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-indigo-50 text-indigo-600 rounded-lg"><Armchair size={20} /></div>
+                    <h3 className="font-semibold text-stone-800 text-lg">{asset.title}</h3>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <StatusBadge type={daysLeft < 0 ? 'neutral' : daysLeft < 45 ? 'warning' : 'success'} text={daysLeft < 0 ? 'Warranty Expired' : `Warranty: ${daysLeft} days left`} />
+                    <button onClick={() => handleDelete('assets', asset.id)} className="text-stone-300 hover:text-rose-500 ml-2"><Trash2 size={16} /></button>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 mt-4">
@@ -339,29 +478,29 @@ export default function Dashboard() {
                     <span className="font-mono text-sm text-stone-700">{asset.purchaseDate}</span>
                   </div>
                   <div className="bg-stone-50 p-3 rounded-lg">
-                     <span className="block text-xs text-stone-400 mb-1">Next Service</span>
-                     <span className="font-mono text-sm text-stone-700">
-                        {asset.serviceInterval > 0 ? format(addDays(new Date(), 45), 'yyyy-MM-dd') : 'N/A'}
-                     </span>
+                    <span className="block text-xs text-stone-400 mb-1">Next Service</span>
+                    <span className="font-mono text-sm text-stone-700">
+                      {asset.serviceInterval > 0 ? format(addDays(new Date(), 45), 'yyyy-MM-dd') : 'N/A'}
+                    </span>
                   </div>
                 </div>
               </div>
 
               <div className="lg:w-1/3 lg:border-l lg:border-stone-100 lg:pl-6">
-                 <h4 className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-3 flex items-center gap-2"><History size={12}/> Service Log</h4>
-                 <div className="space-y-4 relative">
-                    <div className="absolute left-1.5 top-1 bottom-0 w-px bg-stone-200"></div>
-                    {asset.serviceHistory.length > 0 ? asset.serviceHistory.map((log, i) => (
-                      <div key={i} className="relative pl-6">
-                        <div className="absolute left-0 top-1.5 w-3 h-3 bg-stone-100 border-2 border-teal-500 rounded-full"></div>
-                        <p className="text-sm font-medium text-stone-700">{log.note}</p>
-                        <p className="text-xs text-stone-400">{log.date}</p>
-                      </div>
-                    )) : <p className="text-xs text-stone-400 italic pl-6">No service history recorded.</p>}
-                 </div>
+                <h4 className="text-xs font-bold text-stone-400 uppercase tracking-widest mb-3 flex items-center gap-2"><History size={12} /> Service Log</h4>
+                <div className="space-y-4 relative">
+                  <div className="absolute left-1.5 top-1 bottom-0 w-px bg-stone-200"></div>
+                  {asset.serviceHistory.length > 0 ? asset.serviceHistory.map((log, i) => (
+                    <div key={i} className="relative pl-6">
+                      <div className="absolute left-0 top-1.5 w-3 h-3 bg-stone-100 border-2 border-teal-500 rounded-full"></div>
+                      <p className="text-sm font-medium text-stone-700">{log.note}</p>
+                      <p className="text-xs text-stone-400">{log.date}</p>
+                    </div>
+                  )) : <p className="text-xs text-stone-400 italic pl-6">No service history recorded.</p>}
+                </div>
               </div>
             </div>
-           );
+          );
         })}
       </div>
     </div>
@@ -372,8 +511,8 @@ export default function Dashboard() {
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-serif text-stone-800">Financial Control</h2>
         <div className="flex gap-2">
-            <button className="px-3 py-1.5 text-xs font-medium bg-stone-800 text-white rounded-lg">Bills</button>
-            <button className="px-3 py-1.5 text-xs font-medium text-stone-500 hover:bg-stone-100 rounded-lg">Subscriptions</button>
+          <button className="px-3 py-1.5 text-xs font-medium bg-stone-800 text-white rounded-lg">Bills</button>
+          <button className="px-3 py-1.5 text-xs font-medium text-stone-500 hover:bg-stone-100 rounded-lg">Subscriptions</button>
         </div>
       </div>
 
@@ -396,7 +535,7 @@ export default function Dashboard() {
                 <td className="px-6 py-4 font-mono">₹{bill.amount.toLocaleString()}</td>
                 <td className="px-6 py-4">
                   <div className="flex items-center gap-2">
-                     <span className={isPast(parseISO(bill.dueDate)) && bill.status === 'pending' ? 'text-rose-600 font-medium' : 'text-stone-600'}>{bill.dueDate}</span>
+                    <span className={isPast(parseISO(bill.dueDate)) && bill.status === 'pending' ? 'text-rose-600 font-medium' : 'text-stone-600'}>{bill.dueDate}</span>
                   </div>
                 </td>
                 <td className="px-6 py-4">
@@ -407,13 +546,13 @@ export default function Dashboard() {
                 </td>
                 <td className="px-6 py-4">
                   {bill.user === 'family' ? (
-                     <span className="inline-flex items-center gap-1 text-xs text-stone-500 bg-stone-100 px-2 py-1 rounded-md"><Users size={10} /> Household</span>
+                    <span className="inline-flex items-center gap-1 text-xs text-stone-500 bg-stone-100 px-2 py-1 rounded-md"><Users size={10} /> Household</span>
                   ) : (
-                     <span className="inline-flex items-center gap-1 text-xs text-stone-500 bg-stone-100 px-2 py-1 rounded-md"><User size={10} /> {data.users.find(u => u.id === bill.user)?.name || 'Personal'}</span>
+                    <span className="inline-flex items-center gap-1 text-xs text-stone-500 bg-stone-100 px-2 py-1 rounded-md"><User size={10} /> {data.users.find(u => u.id === bill.user)?.name || 'Personal'}</span>
                   )}
                 </td>
                 <td className="px-6 py-4 text-right">
-                    <button onClick={() => handleDelete('bills', bill.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={16}/></button>
+                  <button onClick={() => handleDelete('bills', bill.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={16} /></button>
                 </td>
               </tr>
             ))}
@@ -425,148 +564,288 @@ export default function Dashboard() {
 
   const renderWellness = () => (
     <div className="space-y-6 animate-in fade-in duration-300">
-       <div className="flex justify-between items-center">
+      <div className="flex justify-between items-center">
         <h2 className="text-2xl font-serif text-stone-800">Wellness Hub</h2>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-         <div className="col-span-1 md:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {data.health.filter(h => h.type === 'Blood Group').map(bg => {
-               const user = data.users.find(u => u.id === bg.userId);
-               return (
-                  <div key={bg.id} className="bg-rose-50 border border-rose-100 p-4 rounded-xl flex items-center justify-between">
-                     <div>
-                        <p className="text-xs text-rose-400 font-medium uppercase">{user?.name || 'Unknown'}</p>
-                        <p className="text-2xl font-bold text-rose-600">{bg.value}</p>
-                     </div>
-                     <HeartPulse className="text-rose-300" />
-                  </div>
-               )
-            })}
-         </div>
+        <div className="col-span-1 md:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-4">
+          {data.health.filter(h => h.type === 'Blood Group').map(bg => {
+            const user = data.users.find(u => u.id === bg.userId);
+            return (
+              <div key={bg.id} className="bg-rose-50 border border-rose-100 p-4 rounded-xl flex items-center justify-between">
+                <div>
+                  <p className="text-xs text-rose-400 font-medium uppercase">{user?.name || 'Unknown'}</p>
+                  <p className="text-2xl font-bold text-rose-600">{bg.value}</p>
+                </div>
+                <HeartPulse className="text-rose-300" />
+              </div>
+            )
+          })}
+        </div>
 
-         <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm">
-            <h3 className="font-semibold text-stone-700 mb-4 flex items-center gap-2"><ShieldCheck size={18} className="text-teal-600"/> Vaccinations</h3>
-            <div className="space-y-3">
-               {data.health.filter(h => h.type === 'Vaccination').map(vac => (
-                 <div key={vac.id} className="flex justify-between items-center p-3 bg-stone-50 rounded-lg">
-                    <div>
-                      <p className="font-medium text-stone-800 text-sm">{vac.value}</p>
-                      <p className="text-xs text-stone-400">Last: {vac.date}</p>
-                    </div>
-                    <div className="text-right">
-                       <p className="text-xs font-medium text-teal-600">Next Due</p>
-                       <p className="text-xs text-stone-600">{vac.nextDue}</p>
-                    </div>
-                    <button onClick={() => handleDelete('health', vac.id)} className="text-stone-300 hover:text-rose-500 ml-2"><Trash2 size={14}/></button>
-                 </div>
-               ))}
-            </div>
-         </div>
+        <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm">
+          <h3 className="font-semibold text-stone-700 mb-4 flex items-center gap-2"><ShieldCheck size={18} className="text-teal-600" /> Vaccinations</h3>
+          <div className="space-y-3">
+            {data.health.filter(h => h.type === 'Vaccination').map(vac => (
+              <div key={vac.id} className="flex justify-between items-center p-3 bg-stone-50 rounded-lg">
+                <div>
+                  <p className="font-medium text-stone-800 text-sm">{vac.value}</p>
+                  <p className="text-xs text-stone-400">Last: {vac.date}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs font-medium text-teal-600">Next Due</p>
+                  <p className="text-xs text-stone-600">{vac.nextDue}</p>
+                </div>
+                <button onClick={() => handleDelete('health', vac.id)} className="text-stone-300 hover:text-rose-500 ml-2"><Trash2 size={14} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
 
-         <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm">
-            <h3 className="font-semibold text-stone-700 mb-4 flex items-center gap-2"><Files size={18} className="text-amber-500"/> Active Prescriptions</h3>
-            <div className="space-y-3">
-               {data.health.filter(h => h.type === 'Prescription').map(rx => (
-                 <div key={rx.id} className="p-3 bg-stone-50 rounded-lg border-l-4 border-amber-400 flex justify-between">
-                    <div>
-                        <p className="font-medium text-stone-800 text-sm">{rx.title}</p>
-                        <p className="text-xs text-stone-600 mt-1">{rx.dosage}</p>
-                        <p className="text-[10px] text-stone-400 mt-2 italic">{rx.notes}</p>
-                    </div>
-                    <button onClick={() => handleDelete('health', rx.id)} className="text-stone-300 hover:text-rose-500 ml-2 h-fit"><Trash2 size={14}/></button>
-                 </div>
-               ))}
-            </div>
-         </div>
+        <div className="bg-white p-6 rounded-xl border border-stone-200 shadow-sm">
+          <h3 className="font-semibold text-stone-700 mb-4 flex items-center gap-2"><Files size={18} className="text-amber-500" /> Active Prescriptions</h3>
+          <div className="space-y-3">
+            {data.health.filter(h => h.type === 'Prescription').map(rx => (
+              <div key={rx.id} className="p-3 bg-stone-50 rounded-lg border-l-4 border-amber-400 flex justify-between">
+                <div>
+                  <p className="font-medium text-stone-800 text-sm">{rx.title}</p>
+                  <p className="text-xs text-stone-600 mt-1">{rx.dosage}</p>
+                  <p className="text-[10px] text-stone-400 mt-2 italic">{rx.notes}</p>
+                </div>
+                <button onClick={() => handleDelete('health', rx.id)} className="text-stone-300 hover:text-rose-500 ml-2 h-fit"><Trash2 size={14} /></button>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
     </div>
   );
 
   // Add Form Render
   const renderAddForm = () => {
+    // Common fields rendering...
+    const commonFields = (
+      <div className="mb-3">
+        <label className="text-xs text-stone-500 mb-1 block">Assign To</label>
+        <div className="flex bg-stone-100 p-1 rounded-lg">
+          <button
+            onClick={() => setFormData({ ...formData, userId: currentUser._id })}
+            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${!formData.userId || formData.userId === currentUser._id ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-700'}`}
+          >
+            Me (Personal)
+          </button>
+          <button
+            onClick={() => setFormData({ ...formData, userId: 'family' })}
+            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all ${formData.userId === 'family' ? 'bg-white shadow-sm text-stone-800' : 'text-stone-500 hover:text-stone-700'}`}
+          >
+            Family (Shared)
+          </button>
+        </div>
+      </div>
+    );
+
+    if (addType === 'scan') {
+      return (
+        <div className="space-y-6">
+          {scanStep === 'upload' && (
+            <div className="border-2 border-dashed border-stone-200 rounded-xl p-8 flex flex-col items-center justify-center text-center hover:bg-stone-50 transition-colors relative">
+              <input
+                type="file"
+                accept="image/*,application/pdf"
+                onChange={handleFileUpload}
+                className="absolute inset-0 opacity-0 cursor-pointer"
+              />
+              <div className="w-16 h-16 bg-teal-50 text-teal-600 rounded-full flex items-center justify-center mb-4">
+                <ScanLine size={32} />
+              </div>
+              <h3 className="text-lg font-semibold text-stone-800">Smart Scan</h3>
+              <p className="text-sm text-stone-500 mt-1">Upload a Document, Bill, or Warranty (Image or PDF)</p>
+              <button className="mt-4 bg-stone-900 text-white px-4 py-2 rounded-lg text-sm font-medium">Select File</button>
+            </div>
+          )}
+
+          {scanStep === 'processing' && (
+            <div className="flex flex-col items-center justify-center py-12">
+              <Loader2 className="animate-spin text-teal-600 mb-4" size={48} />
+              <h3 className="text-lg font-semibold text-stone-800">Scanning Document...</h3>
+              <p className="text-stone-500 text-sm mt-1">Extracting text and details ({scanProgress}%)</p>
+            </div>
+          )}
+
+          {scanStep === 'review' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="border border-stone-200 rounded-xl overflow-hidden bg-stone-100 flex items-center justify-center max-h-[400px]">
+                {scannedImage && <img src={scannedImage} alt="Scanned" className="max-w-full max-h-full object-contain" />}
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-medium text-stone-500 uppercase tracking-wider">Detected Type</label>
+                  <select
+                    className="w-full mt-1 p-2 border rounded-lg bg-white"
+                    value={formData.typeSelector || 'doc'}
+                    onChange={e => setFormData({ ...formData, typeSelector: e.target.value })}
+                  >
+                    <option value="doc">Document</option>
+                    <option value="bill">Bill / Expense</option>
+                    <option value="asset">Asset / Warranty</option>
+                    <option value="health">Health Record</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-stone-500 uppercase tracking-wider">Extracted Title</label>
+                  <input
+                    className="w-full mt-1 p-2 border rounded-lg"
+                    value={formData.title || ''}
+                    onChange={e => setFormData({ ...formData, title: e.target.value })}
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-medium text-stone-500 uppercase tracking-wider">Date</label>
+                    <input
+                      type="date"
+                      className="w-full mt-1 p-2 border rounded-lg"
+                      value={formData.date || ''}
+                      onChange={e => setFormData({ ...formData, date: e.target.value })}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-stone-500 uppercase tracking-wider">Amount</label>
+                    <input
+                      type="number"
+                      className="w-full mt-1 p-2 border rounded-lg"
+                      value={formData.amount || ''}
+                      onChange={e => setFormData({ ...formData, amount: e.target.value })}
+                    />
+                  </div>
+                </div>
+
+                <div className="pt-4 flex gap-2">
+                  <button
+                    onClick={() => setScanStep('upload')}
+                    className="flex-1 py-2 border border-stone-200 rounded-lg text-stone-600 hover:bg-stone-50 text-sm font-medium"
+                  >
+                    Try Again
+                  </button>
+                  <button
+                    onClick={handleScanAccept}
+                    className="flex-[2] py-2 bg-teal-600 text-white rounded-lg hover:bg-teal-700 text-sm font-medium"
+                  >
+                    Looks Good, Continue
+                  </button>
+                </div>
+                <button
+                  onClick={() => { setAddType('doc'); setFormData({}); }}
+                  className="w-full text-xs text-stone-400 hover:text-stone-600 underline"
+                >
+                  Switch to Manual Entry
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     switch (addType) {
-        case 'doc':
-            return (
-                <div className="space-y-3">
-                    <input className="w-full p-2 border rounded" placeholder="Title" value={formData.title || ''} onChange={e => setFormData({...formData, title: e.target.value})} />
-                    <input className="w-full p-2 border rounded" placeholder="Type (Insurance, Identity...)" value={formData.type || ''} onChange={e => setFormData({...formData, type: e.target.value})} />
-                    <input className="w-full p-2 border rounded" placeholder="Tags (comma separated)" value={formData.tags || ''} onChange={e => setFormData({...formData, tags: e.target.value.split(',')})} />
-                    <input className="w-full p-2 border rounded" type="date" placeholder="Expiry" value={formData.expiry || ''} onChange={e => setFormData({...formData, expiry: e.target.value})} />
-                    <input className="w-full p-2 border rounded" placeholder="Location" value={formData.location || ''} onChange={e => setFormData({...formData, location: e.target.value})} />
-                    <input className="w-full p-2 border rounded" placeholder="Secure Number (optional)" value={formData.number || ''} onChange={e => setFormData({...formData, number: e.target.value, secure: true})} />
-                    <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Document</button>
-                </div>
-            );
-        case 'asset':
-            return (
-                <div className="space-y-3">
-                    <input className="w-full p-2 border rounded" placeholder="Asset Name" value={formData.title || ''} onChange={e => setFormData({...formData, title: e.target.value})} />
-                    <label className="text-xs text-gray-500">Purchase Date</label>
-                    <input className="w-full p-2 border rounded" type="date" value={formData.purchaseDate || ''} onChange={e => setFormData({...formData, purchaseDate: e.target.value})} />
-                    <label className="text-xs text-gray-500">Warranty Expiry</label>
-                    <input className="w-full p-2 border rounded" type="date" value={formData.warrantyExpiry || ''} onChange={e => setFormData({...formData, warrantyExpiry: e.target.value})} />
-                    <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Asset</button>
-                </div>
-            );
-        case 'bill':
-            return (
-                <div className="space-y-3">
-                    <input className="w-full p-2 border rounded" placeholder="Bill Description" value={formData.title || ''} onChange={e => setFormData({...formData, title: e.target.value})} />
-                    <input className="w-full p-2 border rounded" type="number" placeholder="Amount" value={formData.amount || ''} onChange={e => setFormData({...formData, amount: e.target.value})} />
-                    <label className="text-xs text-gray-500">Due Date</label>
-                    <input className="w-full p-2 border rounded" type="date" value={formData.dueDate || ''} onChange={e => setFormData({...formData, dueDate: e.target.value})} />
-                    <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Bill</button>
-                </div>
-            );
-        case 'health':
-            return (
-                <div className="space-y-3">
-                    <select className="w-full p-2 border rounded" value={formData.type || ''} onChange={e => setFormData({...formData, type: e.target.value})}>
-                        <option value="">Select Type</option>
-                        <option value="Vaccination">Vaccination</option>
-                        <option value="Prescription">Prescription</option>
-                    </select>
-                    {formData.type === 'Vaccination' && (
-                        <>
-                            <input className="w-full p-2 border rounded" placeholder="Vaccine Name" value={formData.value || ''} onChange={e => setFormData({...formData, value: e.target.value})} />
-                            <label className="text-xs text-gray-500">Date Administered</label>
-                            <input className="w-full p-2 border rounded" type="date" value={formData.date || ''} onChange={e => setFormData({...formData, date: e.target.value})} />
-                            <label className="text-xs text-gray-500">Next Due</label>
-                            <input className="w-full p-2 border rounded" type="date" value={formData.nextDue || ''} onChange={e => setFormData({...formData, nextDue: e.target.value})} />
-                        </>
-                    )}
-                    {formData.type === 'Prescription' && (
-                        <>
-                            <input className="w-full p-2 border rounded" placeholder="Medicine Name" value={formData.title || ''} onChange={e => setFormData({...formData, title: e.target.value})} />
-                            <input className="w-full p-2 border rounded" placeholder="Dosage" value={formData.dosage || ''} onChange={e => setFormData({...formData, dosage: e.target.value})} />
-                            <input className="w-full p-2 border rounded" placeholder="Notes" value={formData.notes || ''} onChange={e => setFormData({...formData, notes: e.target.value})} />
-                        </>
-                    )}
-                    <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Record</button>
-                </div>
-            );
-        default:
-            return (
-             <div className="grid grid-cols-2 gap-4">
-                <button onClick={() => setAddType('doc')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
-                   <Files size={32} className="text-teal-500 mb-3" />
-                   <span className="font-medium text-stone-700">Scan Document</span>
-                </button>
-                <button onClick={() => setAddType('asset')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
-                   <Armchair size={32} className="text-amber-500 mb-3" />
-                   <span className="font-medium text-stone-700">New Asset</span>
-                </button>
-                <button onClick={() => setAddType('bill')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
-                   <CreditCard size={32} className="text-rose-500 mb-3" />
-                   <span className="font-medium text-stone-700">Log Expense</span>
-                </button>
-                <button onClick={() => setAddType('health')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
-                   <HeartPulse size={32} className="text-purple-500 mb-3" />
-                   <span className="font-medium text-stone-700">Health Record</span>
-                </button>
-             </div>
-            )
+      case 'doc':
+        return (
+          <div className="space-y-3">
+            {commonFields}
+            <input className="w-full p-2 border rounded" placeholder="Title" value={formData.title || ''} onChange={e => setFormData({ ...formData, title: e.target.value })} />
+            <input className="w-full p-2 border rounded" placeholder="Type (Insurance, Identity...)" value={formData.type || ''} onChange={e => setFormData({ ...formData, type: e.target.value })} />
+            <input className="w-full p-2 border rounded" placeholder="Tags (comma separated)" value={formData.tags || ''} onChange={e => setFormData({ ...formData, tags: e.target.value.split(',') })} />
+            <input className="w-full p-2 border rounded" type="date" placeholder="Expiry" value={formData.expiry || ''} onChange={e => setFormData({ ...formData, expiry: e.target.value })} />
+            <input className="w-full p-2 border rounded" placeholder="Location" value={formData.location || ''} onChange={e => setFormData({ ...formData, location: e.target.value })} />
+            <input className="w-full p-2 border rounded" placeholder="Secure Number (optional)" value={formData.number || ''} onChange={e => setFormData({ ...formData, number: e.target.value, secure: true })} />
+            <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Document</button>
+          </div>
+        );
+      case 'asset':
+        return (
+          <div className="space-y-3">
+            {commonFields}
+            <input className="w-full p-2 border rounded" placeholder="Asset Name" value={formData.title || ''} onChange={e => setFormData({ ...formData, title: e.target.value })} />
+            <label className="text-xs text-gray-500">Purchase Date</label>
+            <input className="w-full p-2 border rounded" type="date" value={formData.purchaseDate || ''} onChange={e => setFormData({ ...formData, purchaseDate: e.target.value })} />
+            <label className="text-xs text-gray-500">Warranty Expiry</label>
+            <input className="w-full p-2 border rounded" type="date" value={formData.warrantyExpiry || ''} onChange={e => setFormData({ ...formData, warrantyExpiry: e.target.value })} />
+            <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Asset</button>
+          </div>
+        );
+      case 'bill':
+        return (
+          <div className="space-y-3">
+            {commonFields}
+            <input className="w-full p-2 border rounded" placeholder="Bill Description" value={formData.title || ''} onChange={e => setFormData({ ...formData, title: e.target.value })} />
+            <input className="w-full p-2 border rounded" type="number" placeholder="Amount" value={formData.amount || ''} onChange={e => setFormData({ ...formData, amount: e.target.value })} />
+            <label className="text-xs text-gray-500">Due Date</label>
+            <input className="w-full p-2 border rounded" type="date" value={formData.dueDate || ''} onChange={e => setFormData({ ...formData, dueDate: e.target.value })} />
+            <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Bill</button>
+          </div>
+        );
+      case 'health':
+        return (
+          <div className="space-y-3">
+            {commonFields}
+            <select className="w-full p-2 border rounded" value={formData.type || ''} onChange={e => setFormData({ ...formData, type: e.target.value })}>
+              <option value="">Select Type</option>
+              <option value="Vaccination">Vaccination</option>
+              <option value="Prescription">Prescription</option>
+            </select>
+            {formData.type === 'Vaccination' && (
+              <>
+                <input className="w-full p-2 border rounded" placeholder="Vaccine Name" value={formData.value || ''} onChange={e => setFormData({ ...formData, value: e.target.value })} />
+                <label className="text-xs text-gray-500">Date Administered</label>
+                <input className="w-full p-2 border rounded" type="date" value={formData.date || ''} onChange={e => setFormData({ ...formData, date: e.target.value })} />
+                <label className="text-xs text-gray-500">Next Due</label>
+                <input className="w-full p-2 border rounded" type="date" value={formData.nextDue || ''} onChange={e => setFormData({ ...formData, nextDue: e.target.value })} />
+              </>
+            )}
+            {formData.type === 'Prescription' && (
+              <>
+                <input className="w-full p-2 border rounded" placeholder="Medicine Name" value={formData.title || ''} onChange={e => setFormData({ ...formData, title: e.target.value })} />
+                <input className="w-full p-2 border rounded" placeholder="Dosage" value={formData.dosage || ''} onChange={e => setFormData({ ...formData, dosage: e.target.value })} />
+                <input className="w-full p-2 border rounded" placeholder="Notes" value={formData.notes || ''} onChange={e => setFormData({ ...formData, notes: e.target.value })} />
+              </>
+            )}
+            <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Record</button>
+          </div>
+        );
+      default:
+        return (
+          <div className="grid grid-cols-2 gap-4">
+            <button onClick={() => { setAddType('scan'); setScanStep('upload'); setFormData({}); }} className="col-span-2 flex flex-row items-center justify-center gap-4 p-6 bg-gradient-to-r from-teal-50 to-emerald-50 rounded-xl hover:from-teal-100 hover:to-emerald-100 transition-colors border border-teal-100 group">
+              <div className="p-3 bg-white rounded-full shadow-sm text-teal-600 group-hover:scale-110 transition-transform">
+                <ScanLine size={24} />
+              </div>
+              <div className="text-left">
+                <span className="font-bold text-teal-900 block text-lg">Smart Scan</span>
+                <span className="text-teal-700/70 text-sm">Auto-fill from Image or PDF</span>
+              </div>
+            </button>
+
+            <button onClick={() => setAddType('doc')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
+              <Files size={32} className="text-stone-400 mb-3" />
+              <span className="font-medium text-stone-700">Manual Document</span>
+            </button>
+            <button onClick={() => setAddType('asset')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
+              <Armchair size={32} className="text-amber-500 mb-3" />
+              <span className="font-medium text-stone-700">New Asset</span>
+            </button>
+            <button onClick={() => setAddType('bill')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
+              <CreditCard size={32} className="text-rose-500 mb-3" />
+              <span className="font-medium text-stone-700">Log Expense</span>
+            </button>
+            <button onClick={() => setAddType('health')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
+              <HeartPulse size={32} className="text-purple-500 mb-3" />
+              <span className="font-medium text-stone-700">Health Record</span>
+            </button>
+          </div>
+        )
     }
   }
 
@@ -575,97 +854,265 @@ export default function Dashboard() {
 
       <aside className="hidden md:flex w-64 flex-col bg-white border-r border-stone-200 h-full">
         <div className="p-6">
-          <h1 className="text-xl font-bold tracking-tight text-stone-800 flex items-center gap-2">
-            <div className="w-8 h-8 bg-stone-900 rounded-lg flex items-center justify-center text-white"><Armchair size={16} /></div>
+          <button
+            onClick={() => { setActiveTab('dashboard'); setSearchQuery(''); setNotificationsOpen(false); }}
+            className="text-xl font-bold tracking-tight text-stone-800 flex items-center gap-3 hover:opacity-80 transition-opacity"
+          >
+            <img src="/logo.png" alt="Hearth" className="w-8 h-8 object-contain" />
             Hearth
-          </h1>
+          </button>
         </div>
 
         <nav className="flex-1 px-4 space-y-1">
-          {[
-            { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-            { id: 'vault', icon: Files, label: 'Vaults' },
-            { id: 'assets', icon: Armchair, label: 'Assets' },
-            { id: 'finance', icon: CreditCard, label: 'Finance' },
-            { id: 'wellness', icon: HeartPulse, label: 'Wellness' },
-          ].map((item) => (
-            <button
-              key={item.id}
-              onClick={() => setActiveTab(item.id)}
-              className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all ${
-                activeTab === item.id
+          {
+            [
+              { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+              { id: 'vault', icon: Files, label: 'Vaults' },
+              { id: 'assets', icon: Armchair, label: 'Assets' },
+              { id: 'finance', icon: CreditCard, label: 'Finance' },
+              { id: 'wellness', icon: HeartPulse, label: 'Wellness' },
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={() => setActiveTab(item.id)}
+                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all ${activeTab === item.id
                   ? 'bg-stone-100 text-stone-900'
                   : 'text-stone-500 hover:bg-stone-50 hover:text-stone-700'
-              }`}
-            >
-              <item.icon size={18} strokeWidth={2} className={activeTab === item.id ? 'text-teal-600' : ''} />
-              {item.label}
-            </button>
-          ))}
-        </nav>
+                  }`}
+              >
+                <item.icon size={18} strokeWidth={2} className={activeTab === item.id ? 'text-teal-600' : ''} />
+                {item.label}
+              </button>
+            ))
+          }
+        </nav >
 
         <div className="p-4 border-t border-stone-100 space-y-2">
-           <button
-             onClick={() => setSOSOpen(true)}
-             className="w-full flex items-center justify-center gap-2 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700 px-4 py-3 rounded-xl text-sm font-bold transition-colors"
-           >
-             <Siren size={18} /> Emergency SOS
-           </button>
-           <button onClick={logout} className="w-full flex items-center justify-center gap-2 text-stone-500 hover:text-stone-800 px-4 py-2 text-xs">
-              <LogOut size={14} /> Sign Out
-           </button>
+          <button
+            onClick={() => setSOSOpen(true)}
+            className="w-full flex items-center justify-center gap-2 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700 px-4 py-3 rounded-xl text-sm font-bold transition-colors"
+          >
+            <Siren size={18} /> Emergency SOS
+          </button>
+          <button onClick={logout} className="w-full flex items-center justify-center gap-2 text-stone-500 hover:text-stone-800 px-4 py-2 text-xs">
+            <LogOut size={14} /> Sign Out
+          </button>
         </div>
-      </aside>
+
+        <div className="px-6 pb-6 mt-auto">
+          <h4 className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-3">Household</h4>
+          <div className="space-y-2">
+            {data.users.filter(u => u.id !== 'family').map(u => (
+              <div key={u.id} className="flex items-center gap-2 text-sm text-stone-600">
+                <span className="text-lg">{u.avatar}</span>
+                <span>{u.name}</span>
+                {u.id === currentUser._id && <span className="text-[10px] bg-stone-100 px-1.5 py-0.5 rounded text-stone-400">You</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      </aside >
 
       <main className="flex-1 flex flex-col h-full overflow-hidden relative">
         <header className="h-16 flex items-center justify-between px-6 bg-white/80 backdrop-blur-md border-b border-stone-200 z-10 sticky top-0">
           <div className="relative w-full max-w-md hidden sm:block">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" size={16} />
-            <input
-              type="text"
-              placeholder="Search documents, warranties, bills (Cmd+K)..."
-              className="w-full pl-10 pr-4 py-2 bg-stone-100 border-none rounded-xl text-sm focus:ring-2 focus:ring-teal-500/20 focus:bg-white transition-all"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-xs font-medium text-stone-400 uppercase tracking-widest">{data.householdName}</span>
+            </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" size={16} />
+              <input
+                type="text"
+                placeholder="Search documents, warranties, bills (Cmd+K)..."
+                className="w-full pl-10 pr-4 py-2 bg-stone-100 border-none rounded-xl text-sm focus:ring-2 focus:ring-teal-500/20 focus:bg-white transition-all"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+              />
+            </div>
 
+          </div>
           <div className="flex items-center gap-4">
-             <div className="flex items-center gap-2 bg-stone-100 p-1 rounded-full">
-                {data.users.map(u => (
-                  <button
-                    key={u.id}
-                    onClick={() => setActiveUser(u)}
-                    className={`w-8 h-8 rounded-full flex items-center justify-center text-sm transition-all ${activeUser?.id === u.id ? 'bg-white shadow-sm scale-110' : 'opacity-50 hover:opacity-100'}`}
-                    title={u.name}
-                  >
-                    {u.avatar}
-                  </button>
-                ))}
-             </div>
-             <button className="relative p-2 text-stone-400 hover:text-stone-600">
-               <Bell size={20} />
-               {urgentItems.length > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border border-white"></span>}
-             </button>
+            <div className="hidden md:flex items-center gap-2 bg-stone-100 rounded-full px-3 py-1">
+              <span className="text-xs text-stone-500 font-medium">Size</span>
+              <input
+                type="range"
+                min="0.75"
+                max="1.25"
+                step="0.05"
+                value={zoomLevel}
+                onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
+                className="w-20 h-1 bg-stone-300 rounded-lg appearance-none cursor-pointer accent-stone-800"
+              />
+            </div>
+            <button
+              onClick={() => setNotificationsOpen(!isNotificationsOpen)}
+              className={`relative p-2 transition-colors ${isNotificationsOpen ? 'text-stone-800 bg-stone-100 rounded-full' : 'text-stone-400 hover:text-stone-600'}`}
+            >
+              <Bell size={20} />
+              {urgentItems.length > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border border-white"></span>}
+            </button>
           </div>
-        </header>
 
-        <div className="flex-1 overflow-y-auto p-6 scroll-smooth">
-           <div className="max-w-5xl mx-auto pb-20 md:pb-0">
-             {activeTab === 'dashboard' && renderDashboard()}
-             {activeTab === 'vault' && renderVault()}
-             {activeTab === 'assets' && renderAssets()}
-             {activeTab === 'finance' && renderFinance()}
-             {activeTab === 'wellness' && renderWellness()}
-           </div>
-        </div>
+          {isNotificationsOpen && (
+            <>
+              <div className="fixed inset-0 z-40" onClick={() => setNotificationsOpen(false)}></div>
+              <div className="absolute top-16 right-6 w-80 bg-white rounded-xl shadow-xl border border-stone-100 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
+                <div className="p-4 border-b border-stone-100 flex justify-between items-center bg-stone-50/50">
+                  <h3 className="font-semibold text-stone-800 text-sm">Notifications</h3>
+                  <span className="text-xs text-stone-400">{urgentItems.length} New</span>
+                </div>
+                <div className="max-h-[calc(100vh-200px)] overflow-y-auto">
+                  {urgentItems.length > 0 ? (
+                    urgentItems.map((item, i) => (
+                      <div
+                        key={i}
+                        onClick={() => {
+                          setActiveTab(item.type === 'bill' ? 'finance' : 'assets');
+                          setNotificationsOpen(false);
+                        }}
+                        className="p-4 border-b border-stone-50 hover:bg-stone-50 transition-colors flex gap-3 cursor-pointer"
+                      >
+                        <div className={`mt-1 p-1.5 rounded-full shrink-0 ${item.type === 'bill' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'}`}>
+                          {item.type === 'bill' ? <CreditCard size={14} /> : <ShieldCheck size={14} />}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-stone-800">{item.title}</p>
+                          <p className="text-xs text-stone-500 mt-0.5">{item.msg}</p>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="p-8 text-center text-stone-400">
+                      <Bell size={24} className="mx-auto mb-2 opacity-20" />
+                      <p className="text-sm">No new notifications</p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </header >
 
-        <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-stone-200 p-2 flex justify-around z-20 pb-safe">
+        {
+          searchQuery && showSearchOverlay ? (
+            <div className="space-y-8 animate-in fade-in duration-300 p-6" >
+              <div className="flex justify-between items-center">
+                <h2 className="text-2xl font-serif text-stone-800">Search Results for "{searchQuery}"</h2>
+                <button onClick={() => setShowSearchOverlay(false)} className="text-sm text-stone-500 hover:text-stone-800 underline">
+                  Close Search
+                </button>
+              </div>
+
+              {filteredDocs.length > 0 && (
+                <div>
+                  <h3 className="font-semibold text-stone-700 mb-3 flex items-center gap-2">
+                    <Files size={18} className="text-teal-600" /> Documents ({filteredDocs.length})
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {filteredDocs.map(doc => (
+                      <div
+                        key={doc.id}
+                        onClick={() => { setActiveTab('vault'); setShowSearchOverlay(false); }}
+                        className="bg-white rounded-xl border border-stone-200 p-4 hover:shadow-md transition-all cursor-pointer group hover:border-teal-500/30"
+                      >
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="p-1.5 bg-stone-50 rounded-lg text-stone-400 group-hover:text-teal-600 transition-colors">
+                            <Files size={16} />
+                          </div>
+                          <span className="text-[10px] uppercase tracking-wider text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded-md">{doc.type}</span>
+                        </div>
+                        <h4 className="font-medium text-stone-800 mb-1">{doc.title}</h4>
+                        {doc.expiry && <p className="text-xs text-stone-400">Expires: {doc.expiry}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+              }
+
+              {
+                filteredAssets.length > 0 && (
+                  <div>
+                    <h3 className="font-semibold text-stone-700 mb-3 flex items-center gap-2">
+                      <Armchair size={18} className="text-amber-600" /> Assets ({filteredAssets.length})
+                    </h3>
+                    <div className="grid grid-cols-1 gap-4">
+                      {filteredAssets.map(asset => (
+                        <div
+                          key={asset.id}
+                          onClick={() => { setActiveTab('assets'); setShowSearchOverlay(false); }}
+                          className="bg-white rounded-xl border border-stone-200 p-4 flex justify-between items-center cursor-pointer hover:shadow-md transition-all hover:border-amber-500/30 group"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-amber-50 text-amber-600 rounded-lg group-hover:scale-110 transition-transform"><Armchair size={18} /></div>
+                            <div>
+                              <span className="font-medium text-stone-800 block">{asset.title}</span>
+                              <span className="text-xs text-stone-500">Purchased: {asset.purchaseDate}</span>
+                            </div>
+                          </div>
+                          <span className="text-xs font-medium bg-stone-100 text-stone-600 px-2 py-1 rounded-lg">View Details</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              }
+
+              {
+                filteredBills.length > 0 && (
+                  <div>
+                    <h3 className="font-semibold text-stone-700 mb-3 flex items-center gap-2">
+                      <CreditCard size={18} className="text-rose-600" /> Bills ({filteredBills.length})
+                    </h3>
+                    <div className="space-y-2">
+                      {filteredBills.map(bill => (
+                        <div
+                          key={bill.id}
+                          onClick={() => { setActiveTab('finance'); setShowSearchOverlay(false); }}
+                          className="bg-white rounded-xl border border-stone-200 p-4 flex justify-between items-center cursor-pointer hover:shadow-md transition-all hover:border-rose-500/30 group"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="p-2 bg-rose-50 text-rose-600 rounded-lg group-hover:scale-110 transition-transform"><CreditCard size={18} /></div>
+                            <div>
+                              <span className="font-medium text-stone-800 block">{bill.title}</span>
+                              <span className={`text-xs ${isPast(parseISO(bill.dueDate)) ? 'text-rose-500' : 'text-stone-500'}`}>Due: {bill.dueDate}</span>
+                            </div>
+                          </div>
+                          <span className="font-mono text-sm font-bold text-stone-700">₹{bill.amount.toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              }
+
+              {
+                filteredDocs.length === 0 && filteredAssets.length === 0 && filteredBills.length === 0 && (
+                  <div className="text-center py-12 text-stone-400">
+                    <Search size={48} className="mx-auto mb-4 opacity-20" />
+                    <p>No results found</p>
+                  </div>
+                )
+              }
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto p-6 pb-24">
+              {activeTab === 'dashboard' && renderDashboard()}
+              {activeTab === 'vault' && renderVault()}
+              {activeTab === 'assets' && renderAssets()}
+              {activeTab === 'finance' && renderFinance()}
+              {activeTab === 'wellness' && renderWellness()}
+            </div>
+          )
+        }
+
+        <div className="md:hidden bg-white border-t border-stone-200 p-4 flex justify-around shrink-0 z-20">
           {[
             { id: 'dashboard', icon: LayoutDashboard },
             { id: 'vault', icon: Files },
             { id: 'assets', icon: Armchair },
             { id: 'finance', icon: CreditCard },
+            { id: 'wellness', icon: HeartPulse }
           ].map((item) => (
             <button
               key={item.id}
@@ -675,40 +1122,40 @@ export default function Dashboard() {
               <item.icon size={22} />
             </button>
           ))}
-           <button onClick={() => setSOSOpen(true)} className="p-3 rounded-xl bg-rose-50 text-rose-600"><Siren size={22} /></button>
+          <button onClick={() => setSOSOpen(true)} className="p-3 rounded-xl bg-rose-50 text-rose-600"><Siren size={22} /></button>
         </div>
-      </main>
+      </main >
 
       <Modal isOpen={isSOSOpen} onClose={() => setSOSOpen(false)} title="Emergency Protocol">
-         <div className="space-y-6">
-            <div className="bg-rose-50 border border-rose-100 p-4 rounded-xl text-center">
-              <h4 className="text-rose-700 font-bold text-lg mb-1">House Flood / Fire</h4>
-              <p className="text-rose-600 font-mono text-xl">080-100-2000</p>
-            </div>
+        <div className="space-y-6">
+          <div className="bg-rose-50 border border-rose-100 p-4 rounded-xl text-center">
+            <h4 className="text-rose-700 font-bold text-lg mb-1">House Flood / Fire</h4>
+            <p className="text-rose-600 font-mono text-xl">080-100-2000</p>
+          </div>
 
-            <div>
-               <h4 className="font-semibold text-stone-700 mb-2">Primary Contacts</h4>
-               <div className="space-y-2">
-                 {data.emergency.contacts.map((c, i) => (
-                   <div key={i} className="flex justify-between items-center bg-stone-50 p-3 rounded-lg">
-                      <span className="text-sm font-medium text-stone-800">{c.name}</span>
-                      <a href={`tel:${c.number}`} className="text-teal-600 font-mono text-sm font-bold bg-white px-2 py-1 rounded shadow-sm border border-stone-100">{c.number}</a>
-                   </div>
-                 ))}
-               </div>
+          <div>
+            <h4 className="font-semibold text-stone-700 mb-2">Primary Contacts</h4>
+            <div className="space-y-2">
+              {data.emergency.contacts.map((c, i) => (
+                <div key={i} className="flex justify-between items-center bg-stone-50 p-3 rounded-lg">
+                  <span className="text-sm font-medium text-stone-800">{c.name}</span>
+                  <a href={`tel:${c.number}`} className="text-teal-600 font-mono text-sm font-bold bg-white px-2 py-1 rounded shadow-sm border border-stone-100">{c.number}</a>
+                </div>
+              ))}
             </div>
+          </div>
 
-            <div className="p-4 bg-stone-800 text-stone-200 rounded-xl">
-               <h4 className="text-xs uppercase tracking-widest text-stone-400 mb-1">Health Insurance Policy</h4>
-               <p className="font-mono text-lg">{data.emergency.insurance || 'Not Set'}</p>
-            </div>
-         </div>
+          <div className="p-4 bg-stone-800 text-stone-200 rounded-xl">
+            <h4 className="text-xs uppercase tracking-widest text-stone-400 mb-1">Health Insurance Policy</h4>
+            <p className="font-mono text-lg">{data.emergency.insurance || 'Not Set'}</p>
+          </div>
+        </div>
       </Modal>
 
       <Modal isOpen={isQuickAddOpen} onClose={() => { setQuickAddOpen(false); setAddType(null); setFormData({}); }} title={addType ? "Add Detail" : "Add to Hearth"}>
-         {renderAddForm()}
+        {renderAddForm()}
       </Modal>
 
-    </div>
+    </div >
   );
 }

@@ -33,20 +33,19 @@ const seedData = async () => {
     });
 
     // Create Users
+    // Create Users
     const admin = await User.create({
-        name: 'John Smith',
-        username: 'john',
+        name: 'Deepak N',
+        username: 'deepak',
         password: 'password123',
-        role: 'admin',
         avatar: '👨',
         household: household._id
     });
 
     const member = await User.create({
-        name: 'Jane Smith',
-        username: 'jane',
+        name: 'Sreevalli Prakash',
+        username: 'sreevalli',
         password: 'password123',
-        role: 'member',
         avatar: '👩',
         household: household._id
     });
@@ -65,7 +64,26 @@ const seedData = async () => {
             number: 'POL-99887766'
         },
         {
-            title: 'John\'s Passport',
+            title: 'Property Deed',
+            type: 'Property',
+            tags: ['home', 'legal'],
+            userId: 'family',
+            householdId: household._id,
+            location: 'Bank Locker',
+            secure: true
+        },
+        {
+            title: 'Car Insurance (Honda)',
+            type: 'Insurance',
+            tags: ['car', 'insurance'],
+            userId: 'family',
+            householdId: household._id,
+            expiry: new Date('2024-08-15'),
+            location: 'Glove Box',
+            number: 'CAR-112233'
+        },
+        {
+            title: 'Deepak\'s Passport',
             type: 'Identity',
             tags: ['travel', 'id'],
             userId: admin._id,
@@ -76,7 +94,27 @@ const seedData = async () => {
             number: 'A12345678'
         },
         {
-            title: 'Jane\'s Driving License',
+            title: 'Deepak\'s Aadhaar',
+            type: 'Identity',
+            tags: ['id', 'government'],
+            userId: admin._id,
+            householdId: household._id,
+            location: 'Wallet',
+            secure: true,
+            number: '1234-5678-9012'
+        },
+        {
+            title: 'Deepak\'s PAN Card',
+            type: 'Identity',
+            tags: ['id', 'tax'],
+            userId: admin._id,
+            householdId: household._id,
+            location: 'Wallet',
+            secure: true,
+            number: 'ABCDE1234F'
+        },
+        {
+            title: 'Sreevalli\'s Driving License',
             type: 'Identity',
             tags: ['id', 'driving'],
             userId: member._id,
@@ -85,6 +123,33 @@ const seedData = async () => {
             location: 'Wallet',
             secure: true,
             number: 'DL-555-444'
+        },
+        {
+            title: 'Sreevalli\'s Passport',
+            type: 'Identity',
+            tags: ['travel', 'id'],
+            userId: member._id,
+            householdId: household._id,
+            expiry: new Date('2029-01-10'),
+            location: 'Safe Box 1',
+            secure: true,
+            number: 'Z98765432'
+        },
+        {
+            title: 'Marriage Certificate',
+            type: 'Legal',
+            tags: ['legal', 'family'],
+            userId: 'family',
+            householdId: household._id,
+            location: 'Safe Box 1'
+        },
+        {
+            title: 'Wifi Contract',
+            type: 'Utility',
+            tags: ['utility', 'home'],
+            userId: 'family',
+            householdId: household._id,
+            expiry: new Date('2025-01-01')
         }
     ];
 
@@ -102,11 +167,54 @@ const seedData = async () => {
             serviceHistory: [{ date: '2023-01-15', note: 'Installation' }]
         },
         {
-            title: 'MacBook Pro',
+            title: 'Washing Machine LG',
+            purchaseDate: '2022-11-20',
+            warrantyExpiry: '2024-11-20',
+            serviceInterval: 180,
+            userId: 'family',
+            householdId: household._id
+        },
+        {
+            title: 'Sony Bravia TV',
+            purchaseDate: '2021-05-10',
+            warrantyExpiry: '2024-05-10', // Expiring soon
+            userId: 'family',
+            householdId: household._id
+        },
+        {
+            title: 'Deepak\'s MacBook Pro',
             purchaseDate: '2022-06-01',
             warrantyExpiry: '2023-06-01', // Expired
             serviceInterval: 0,
             userId: admin._id,
+            householdId: household._id
+        },
+        {
+            title: 'Deepak\'s iPhone 14',
+            purchaseDate: '2022-10-01',
+            warrantyExpiry: '2023-10-01',
+            userId: admin._id,
+            householdId: household._id
+        },
+        {
+            title: 'Sreevalli\'s iPad Air',
+            purchaseDate: '2023-03-15',
+            warrantyExpiry: '2024-03-15',
+            userId: member._id,
+            householdId: household._id
+        },
+        {
+            title: 'Dyson Vacuum',
+            purchaseDate: '2023-07-01',
+            warrantyExpiry: '2025-07-01',
+            userId: 'family',
+            householdId: household._id
+        },
+        {
+            title: 'Coffee Maker',
+            purchaseDate: '2020-12-25',
+            warrantyExpiry: '2021-12-25', // Expired
+            userId: 'family',
             householdId: household._id
         }
     ];
@@ -118,8 +226,16 @@ const seedData = async () => {
         {
             title: 'Electricity Bill',
             amount: 1500,
-            dueDate: '2023-11-05', // Past due if today is > Nov 5
+            dueDate: '2023-11-05', // Past due
             status: 'pending',
+            user: 'family',
+            householdId: household._id
+        },
+        {
+            title: 'Water Bill',
+            amount: 450,
+            dueDate: '2023-11-10',
+            status: 'paid',
             user: 'family',
             householdId: household._id
         },
@@ -127,6 +243,38 @@ const seedData = async () => {
             title: 'Netflix Subscription',
             amount: 199,
             dueDate: '2023-11-20',
+            status: 'pending',
+            user: 'family',
+            householdId: household._id
+        },
+        {
+            title: 'Internet Bill',
+            amount: 999,
+            dueDate: '2023-11-01',
+            status: 'paid',
+            user: 'family',
+            householdId: household._id
+        },
+        {
+            title: 'Deepak\'s Credit Card',
+            amount: 12500,
+            dueDate: '2023-11-15',
+            status: 'pending',
+            user: admin._id,
+            householdId: household._id
+        },
+        {
+            title: 'Sreevalli\'s Phone Bill',
+            amount: 699,
+            dueDate: '2023-11-12',
+            status: 'paid',
+            user: member._id,
+            householdId: household._id
+        },
+        {
+            title: 'House Maintenance',
+            amount: 2500,
+            dueDate: '2023-12-01',
             status: 'pending',
             user: 'family',
             householdId: household._id
@@ -156,6 +304,40 @@ const seedData = async () => {
             value: 'Flu Shot',
             date: '2023-09-10',
             nextDue: '2024-09-10'
+        },
+        {
+            userId: admin._id,
+            householdId: household._id,
+            type: 'Prescription',
+            title: 'Vitamin D',
+            dosage: '1000IU Daily',
+            notes: 'Take with food'
+        },
+        {
+            userId: member._id,
+            householdId: household._id,
+            type: 'Vaccination',
+            value: 'Tetanus',
+            date: '2020-05-15',
+            nextDue: '2030-05-15'
+        },
+        {
+            userId: member._id,
+            householdId: household._id,
+            type: 'Prescription',
+            title: 'Iron Supplement',
+            dosage: '1 Tablet Daily',
+            notes: 'Morning'
+        },
+        {
+            userId: 'family', // General kit info maybe? Or just assign to someone. Let's assign to admin for now or keep as family if schema allows (schema usually links to user, but let's see)
+            // Actually Health usually is personal. I'll assign these to admin/member.
+            // But let's add a family one if supported, or just more personal ones.
+            // I'll stick to personal for health as it makes more sense.
+            householdId: household._id,
+            type: 'Allergy',
+            value: 'Peanuts (Deepak)',
+            notes: 'Severe'
         }
     ];
 
@@ -171,6 +353,16 @@ const seedData = async () => {
         {
             name: 'Dr. House',
             number: '555-0100',
+            householdId: household._id
+        },
+        {
+            name: 'Fire Station',
+            number: '101',
+            householdId: household._id
+        },
+        {
+            name: 'Police',
+            number: '100',
             householdId: household._id
         }
     ];
