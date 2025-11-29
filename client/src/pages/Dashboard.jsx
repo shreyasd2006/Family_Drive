@@ -46,6 +46,9 @@ export default function Dashboard() {
     bills: [],
     health: [],
     emergency: { contacts: [], insurance: '' },
+    vehicles: [],
+    properties: [],
+    subscriptions: [],
     householdName: ''
   });
   const [loading, setLoading] = useState(true);
@@ -58,7 +61,8 @@ export default function Dashboard() {
   const [isQuickAddOpen, setQuickAddOpen] = useState(false);
   const [travelMode, setTravelMode] = useState(false);
   const [zoomLevel, setZoomLevel] = useState(1);
-  const [addType, setAddType] = useState(null); // 'doc', 'asset', 'bill', 'health', 'scan'
+  const [addType, setAddType] = useState(null); // 'doc', 'asset', 'bill', 'health', 'scan', 'vehicle', 'property', 'subscription'
+  const [financeTab, setFinanceTab] = useState('bills'); // 'bills' or 'subscriptions'
 
   // OCR State
   const [isScanning, setIsScanning] = useState(false);
@@ -66,6 +70,11 @@ export default function Dashboard() {
   const [scannedImage, setScannedImage] = useState(null);
   const [scanProgress, setScanProgress] = useState(0);
   const [scanResult, setScanResult] = useState(null);
+
+  // Invite State
+  const [inviteCode, setInviteCode] = useState(null);
+  const [inviteExpires, setInviteExpires] = useState(null);
+  const [isInviteModalOpen, setInviteModalOpen] = useState(false);
 
   // Form States
   const [formData, setFormData] = useState({});
@@ -110,11 +119,6 @@ export default function Dashboard() {
   const handleAddSubmit = async (e) => {
     e.preventDefault();
     try {
-      // Add userId to formData based on activeUser or current User
-      // If activeUser is 'family' or a user, we should probably let the user select?
-      // For now, let's assume it belongs to the 'activeUser' selected in the dashboard or the logged in user.
-      // The backend expects 'userId'.
-
       const payload = { ...formData };
       if (!payload.userId) {
         payload.userId = currentUser._id;
@@ -125,8 +129,16 @@ export default function Dashboard() {
       if (addType === 'asset') endpoint = '/assets';
       if (addType === 'bill') endpoint = '/bills';
       if (addType === 'health') endpoint = '/health';
+      if (addType === 'vehicle') endpoint = '/vehicles';
+      if (addType === 'property') endpoint = '/properties';
+      if (addType === 'subscription') endpoint = '/subscriptions';
 
-      await api.post(endpoint, payload);
+      if (addType === 'subscription' && payload.id) {
+        await api.put(`${endpoint}/${payload.id}`, payload);
+      } else {
+        await api.post(endpoint, payload);
+      }
+
       setQuickAddOpen(false);
       setAddType(null);
       setFormData({});
@@ -136,8 +148,6 @@ export default function Dashboard() {
     }
   };
 
-
-  // OCR Logic
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -208,6 +218,17 @@ export default function Dashboard() {
       alert('Scan failed: ' + err.message);
       setScanStep('upload');
       setIsScanning(false);
+    }
+  };
+
+  const handleGenerateInvite = async () => {
+    try {
+      const res = await api.post('/invitations');
+      setInviteCode(res.data.code);
+      setInviteExpires(res.data.expiresAt);
+      setInviteModalOpen(true);
+    } catch (err) {
+      alert('Failed to generate invite: ' + err.message);
     }
   };
 
@@ -323,6 +344,25 @@ export default function Dashboard() {
               <span className="text-emerald-800 text-sm">Everything is running smoothly. No urgent alerts.</span>
             </div>
           )}
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-2xl border border-stone-100 shadow-sm">
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-semibold text-stone-700">My Family: {data.householdName}</h3>
+          <button onClick={handleGenerateInvite} className="text-xs font-medium text-teal-600 hover:text-teal-700 flex items-center gap-1 bg-teal-50 px-2 py-1 rounded-lg transition-colors">
+            <Plus size={14} /> Invite Member
+          </button>
+        </div>
+        <div className="flex flex-wrap gap-6">
+          {data.users.filter(u => u.id !== 'family').map(u => (
+            <div key={u.id} className="flex flex-col items-center gap-2">
+              <div className="w-12 h-12 rounded-full bg-stone-100 border-2 border-white shadow-sm flex items-center justify-center text-xl text-stone-600 font-serif">
+                {u.name ? u.name.charAt(0) : '?'}
+              </div>
+              <span className="text-xs font-medium text-stone-600">{u.name}</span>
+            </div>
+          ))}
         </div>
       </div>
 
@@ -506,59 +546,169 @@ export default function Dashboard() {
     </div>
   );
 
+  const renderVehicles = () => (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-serif text-stone-800">Vehicles</h2>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {data.vehicles.map(vehicle => (
+          <div key={vehicle.id} className="bg-white rounded-xl border border-stone-200 p-6">
+            <div className="flex justify-between items-start mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Plane size={20} /></div> {/* Using Plane as placeholder icon for Vehicle */}
+                <h3 className="font-semibold text-stone-800 text-lg">{vehicle.number}</h3>
+              </div>
+              <button onClick={() => handleDelete('vehicles', vehicle.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={16} /></button>
+            </div>
+            <div className="space-y-2">
+              {vehicle.customFields && vehicle.customFields.map((field, idx) => (
+                <div key={idx} className="flex justify-between text-sm">
+                  <span className="text-stone-500">{field.label}</span>
+                  <span className="font-medium text-stone-800">{field.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+        {data.vehicles.length === 0 && <p className="text-stone-400 italic">No vehicles added.</p>}
+      </div>
+    </div>
+  );
+
+  const renderProperties = () => (
+    <div className="space-y-6 animate-in fade-in duration-300">
+      <div className="flex justify-between items-center">
+        <h2 className="text-2xl font-serif text-stone-800">Properties</h2>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {data.properties.map(property => (
+          <div key={property.id} className="bg-white rounded-xl border border-stone-200 p-6">
+            <div className="flex justify-between items-start mb-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-amber-50 text-amber-600 rounded-lg"><MapPin size={20} /></div>
+                <h3 className="font-semibold text-stone-800 text-lg">{property.name}</h3>
+              </div>
+              <button onClick={() => handleDelete('properties', property.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={16} /></button>
+            </div>
+            <div className="space-y-2">
+              {property.customFields && property.customFields.map((field, idx) => (
+                <div key={idx} className="flex justify-between text-sm">
+                  <span className="text-stone-500">{field.label}</span>
+                  <span className="font-medium text-stone-800">{field.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ))}
+        {data.properties.length === 0 && <p className="text-stone-400 italic">No properties added.</p>}
+      </div>
+    </div>
+  );
+
   const renderFinance = () => (
     <div className="space-y-6 animate-in fade-in duration-300">
       <div className="flex justify-between items-center">
         <h2 className="text-2xl font-serif text-stone-800">Financial Control</h2>
-        <div className="flex gap-2">
-          <button className="px-3 py-1.5 text-xs font-medium bg-stone-800 text-white rounded-lg">Bills</button>
-          <button className="px-3 py-1.5 text-xs font-medium text-stone-500 hover:bg-stone-100 rounded-lg">Subscriptions</button>
+        <div className="flex items-center gap-3">
+          {financeTab === 'subscriptions' && (
+            <button onClick={() => { setAddType('subscription'); setQuickAddOpen(true); }} className="flex items-center gap-1 text-sm font-medium text-teal-600 hover:text-teal-700 bg-teal-50 px-3 py-1.5 rounded-lg transition-colors">
+              <Plus size={16} /> Add Subscription
+            </button>
+          )}
+          <div className="flex gap-2">
+            <button onClick={() => setFinanceTab('bills')} className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${financeTab === 'bills' ? 'bg-stone-800 text-white' : 'text-stone-500 hover:bg-stone-100'}`}>Bills</button>
+            <button onClick={() => setFinanceTab('subscriptions')} className={`px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${financeTab === 'subscriptions' ? 'bg-stone-800 text-white' : 'text-stone-500 hover:bg-stone-100'}`}>Subscriptions</button>
+          </div>
         </div>
       </div>
 
-      <div className="bg-white border border-stone-200 rounded-xl overflow-hidden shadow-sm">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-stone-50 text-stone-500 border-b border-stone-200">
-            <tr>
-              <th className="px-6 py-4 font-medium">Description</th>
-              <th className="px-6 py-4 font-medium">Amount</th>
-              <th className="px-6 py-4 font-medium">Due Date</th>
-              <th className="px-6 py-4 font-medium">Status</th>
-              <th className="px-6 py-4 font-medium">Assigned To</th>
-              <th className="px-6 py-4 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {filteredBills.map(bill => (
-              <tr key={bill.id} className="hover:bg-stone-50/50 transition-colors">
-                <td className="px-6 py-4 font-medium text-stone-800">{bill.title}</td>
-                <td className="px-6 py-4 font-mono">₹{bill.amount.toLocaleString()}</td>
-                <td className="px-6 py-4">
-                  <div className="flex items-center gap-2">
-                    <span className={isPast(parseISO(bill.dueDate)) && bill.status === 'pending' ? 'text-rose-600 font-medium' : 'text-stone-600'}>{bill.dueDate}</span>
-                  </div>
-                </td>
-                <td className="px-6 py-4">
-                  <StatusBadge
-                    type={bill.status === 'paid' ? 'success' : isPast(parseISO(bill.dueDate)) ? 'danger' : 'warning'}
-                    text={bill.status === 'paid' ? 'Paid' : isPast(parseISO(bill.dueDate)) ? 'Overdue' : 'Pending'}
-                  />
-                </td>
-                <td className="px-6 py-4">
-                  {bill.user === 'family' ? (
-                    <span className="inline-flex items-center gap-1 text-xs text-stone-500 bg-stone-100 px-2 py-1 rounded-md"><Users size={10} /> Household</span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 text-xs text-stone-500 bg-stone-100 px-2 py-1 rounded-md"><User size={10} /> {data.users.find(u => u.id === bill.user)?.name || 'Personal'}</span>
-                  )}
-                </td>
-                <td className="px-6 py-4 text-right">
-                  <button onClick={() => handleDelete('bills', bill.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={16} /></button>
-                </td>
+      {financeTab === 'bills' ? (
+        <div className="bg-white border border-stone-200 rounded-xl overflow-hidden shadow-sm">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-stone-50 text-stone-500 border-b border-stone-200">
+              <tr>
+                <th className="px-6 py-4 font-medium">Description</th>
+                <th className="px-6 py-4 font-medium">Amount</th>
+                <th className="px-6 py-4 font-medium">Due Date</th>
+                <th className="px-6 py-4 font-medium">Status</th>
+                <th className="px-6 py-4 font-medium">Assigned To</th>
+                <th className="px-6 py-4 font-medium"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y divide-stone-100">
+              {filteredBills.map(bill => (
+                <tr key={bill.id} className="hover:bg-stone-50/50 transition-colors">
+                  <td className="px-6 py-4 font-medium text-stone-800">{bill.title}</td>
+                  <td className="px-6 py-4 font-mono">₹{bill.amount.toLocaleString()}</td>
+                  <td className="px-6 py-4">
+                    <div className="flex items-center gap-2">
+                      <span className={isPast(parseISO(bill.dueDate)) && bill.status === 'pending' ? 'text-rose-600 font-medium' : 'text-stone-600'}>{bill.dueDate}</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4">
+                    <StatusBadge
+                      type={bill.status === 'paid' ? 'success' : isPast(parseISO(bill.dueDate)) ? 'danger' : 'warning'}
+                      text={bill.status === 'paid' ? 'Paid' : isPast(parseISO(bill.dueDate)) ? 'Overdue' : 'Pending'}
+                    />
+                  </td>
+                  <td className="px-6 py-4">
+                    {bill.user === 'family' ? (
+                      <span className="inline-flex items-center gap-1 text-xs text-stone-500 bg-stone-100 px-2 py-1 rounded-md"><Users size={10} /> Household</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-xs text-stone-500 bg-stone-100 px-2 py-1 rounded-md"><User size={10} /> {data.users.find(u => u.id === bill.user)?.name || 'Personal'}</span>
+                    )}
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <button onClick={() => handleDelete('bills', bill.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={16} /></button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="bg-white border border-stone-200 rounded-xl overflow-hidden shadow-sm">
+          <table className="w-full text-left text-sm">
+            <thead className="bg-stone-50 text-stone-500 border-b border-stone-200">
+              <tr>
+                <th className="px-6 py-4 font-medium">Name</th>
+                <th className="px-6 py-4 font-medium">Amount</th>
+                <th className="px-6 py-4 font-medium">Billing Cycle</th>
+                <th className="px-6 py-4 font-medium">Next Billing</th>
+                <th className="px-6 py-4 font-medium">Status</th>
+                <th className="px-6 py-4 font-medium"></th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-stone-100">
+              {data.subscriptions.map(sub => (
+                <tr key={sub.id} className="hover:bg-stone-50/50 transition-colors">
+                  <td className="px-6 py-4 font-medium text-stone-800">{sub.name}</td>
+                  <td className="px-6 py-4 font-mono">₹{sub.amount.toLocaleString()}</td>
+                  <td className="px-6 py-4 capitalize">{sub.billingCycle}</td>
+                  <td className="px-6 py-4">{sub.nextBillingDate}</td>
+                  <td className="px-6 py-4">
+                    <StatusBadge type={sub.status === 'active' ? 'success' : 'neutral'} text={sub.status} />
+                  </td>
+                  <td className="px-6 py-4 text-right flex gap-2 justify-end">
+                    <button onClick={() => {
+                      setAddType('subscription');
+                      setFormData(sub); // Populate for edit
+                      setQuickAddOpen(true);
+                    }} className="text-stone-300 hover:text-teal-500">Edit</button>
+                    <button onClick={() => handleDelete('subscriptions', sub.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={16} /></button>
+                  </td>
+                </tr>
+              ))}
+              {data.subscriptions.length === 0 && (
+                <tr>
+                  <td colSpan="6" className="px-6 py-8 text-center text-stone-400 italic">No subscriptions tracked yet.</td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 
@@ -801,18 +951,101 @@ export default function Dashboard() {
                 <input className="w-full p-2 border rounded" placeholder="Vaccine Name" value={formData.value || ''} onChange={e => setFormData({ ...formData, value: e.target.value })} />
                 <label className="text-xs text-gray-500">Date Administered</label>
                 <input className="w-full p-2 border rounded" type="date" value={formData.date || ''} onChange={e => setFormData({ ...formData, date: e.target.value })} />
-                <label className="text-xs text-gray-500">Next Due</label>
+                <label className="text-xs text-gray-500">Next Due Date</label>
                 <input className="w-full p-2 border rounded" type="date" value={formData.nextDue || ''} onChange={e => setFormData({ ...formData, nextDue: e.target.value })} />
               </>
             )}
             {formData.type === 'Prescription' && (
               <>
-                <input className="w-full p-2 border rounded" placeholder="Medicine Name" value={formData.title || ''} onChange={e => setFormData({ ...formData, title: e.target.value })} />
-                <input className="w-full p-2 border rounded" placeholder="Dosage" value={formData.dosage || ''} onChange={e => setFormData({ ...formData, dosage: e.target.value })} />
-                <input className="w-full p-2 border rounded" placeholder="Notes" value={formData.notes || ''} onChange={e => setFormData({ ...formData, notes: e.target.value })} />
+                <input className="w-full p-2 border rounded" placeholder="Medication Name" value={formData.title || ''} onChange={e => setFormData({ ...formData, title: e.target.value })} />
+                <input className="w-full p-2 border rounded" placeholder="Dosage (e.g. 10mg)" value={formData.dosage || ''} onChange={e => setFormData({ ...formData, dosage: e.target.value })} />
+                <textarea className="w-full p-2 border rounded" placeholder="Notes / Instructions" value={formData.notes || ''} onChange={e => setFormData({ ...formData, notes: e.target.value })} />
               </>
             )}
-            <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Record</button>
+            <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Health Record</button>
+          </div>
+        );
+      case 'vehicle':
+        return (
+          <div className="space-y-3">
+            {commonFields}
+            <input className="w-full p-2 border rounded" placeholder="Vehicle Number" value={formData.number || ''} onChange={e => setFormData({ ...formData, number: e.target.value })} />
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-stone-500">Custom Fields</label>
+              {(formData.customFields || []).map((field, idx) => (
+                <div key={idx} className="flex gap-2">
+                  <input className="flex-1 p-2 border rounded text-sm" placeholder="Label" value={field.label} onChange={e => {
+                    const newFields = [...(formData.customFields || [])];
+                    newFields[idx].label = e.target.value;
+                    setFormData({ ...formData, customFields: newFields });
+                  }} />
+                  <input className="flex-1 p-2 border rounded text-sm" placeholder="Value" value={field.value} onChange={e => {
+                    const newFields = [...(formData.customFields || [])];
+                    newFields[idx].value = e.target.value;
+                    setFormData({ ...formData, customFields: newFields });
+                  }} />
+                  <button onClick={() => {
+                    const newFields = formData.customFields.filter((_, i) => i !== idx);
+                    setFormData({ ...formData, customFields: newFields });
+                  }} className="text-rose-500"><X size={16} /></button>
+                </div>
+              ))}
+              <button onClick={() => setFormData({ ...formData, customFields: [...(formData.customFields || []), { label: '', value: '' }] })} className="text-xs text-teal-600 font-medium">+ Add Field</button>
+            </div>
+
+            <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Vehicle</button>
+          </div>
+        );
+      case 'property':
+        return (
+          <div className="space-y-3">
+            {commonFields}
+            <input className="w-full p-2 border rounded" placeholder="Property Name" value={formData.name || ''} onChange={e => setFormData({ ...formData, name: e.target.value })} />
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-stone-500">Custom Fields</label>
+              {(formData.customFields || []).map((field, idx) => (
+                <div key={idx} className="flex gap-2">
+                  <input className="flex-1 p-2 border rounded text-sm" placeholder="Label" value={field.label} onChange={e => {
+                    const newFields = [...(formData.customFields || [])];
+                    newFields[idx].label = e.target.value;
+                    setFormData({ ...formData, customFields: newFields });
+                  }} />
+                  <input className="flex-1 p-2 border rounded text-sm" placeholder="Value" value={field.value} onChange={e => {
+                    const newFields = [...(formData.customFields || [])];
+                    newFields[idx].value = e.target.value;
+                    setFormData({ ...formData, customFields: newFields });
+                  }} />
+                  <button onClick={() => {
+                    const newFields = formData.customFields.filter((_, i) => i !== idx);
+                    setFormData({ ...formData, customFields: newFields });
+                  }} className="text-rose-500"><X size={16} /></button>
+                </div>
+              ))}
+              <button onClick={() => setFormData({ ...formData, customFields: [...(formData.customFields || []), { label: '', value: '' }] })} className="text-xs text-teal-600 font-medium">+ Add Field</button>
+            </div>
+
+            <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Property</button>
+          </div>
+        );
+      case 'subscription':
+        return (
+          <div className="space-y-3">
+            {commonFields}
+            <input className="w-full p-2 border rounded" placeholder="Subscription Name" value={formData.name || ''} onChange={e => setFormData({ ...formData, name: e.target.value })} />
+            <input className="w-full p-2 border rounded" type="number" placeholder="Amount" value={formData.amount || ''} onChange={e => setFormData({ ...formData, amount: e.target.value })} />
+            <select className="w-full p-2 border rounded" value={formData.billingCycle || 'monthly'} onChange={e => setFormData({ ...formData, billingCycle: e.target.value })}>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly</option>
+            </select>
+            <label className="text-xs text-gray-500">Next Billing Date</label>
+            <input className="w-full p-2 border rounded" type="date" value={formData.nextBillingDate || ''} onChange={e => setFormData({ ...formData, nextBillingDate: e.target.value })} />
+            <select className="w-full p-2 border rounded" value={formData.status || 'active'} onChange={e => setFormData({ ...formData, status: e.target.value })}>
+              <option value="active">Active</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+            <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Subscription</button>
           </div>
         );
       default:
@@ -831,280 +1064,237 @@ export default function Dashboard() {
             <button onClick={() => setAddType('doc')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
               <Files size={32} className="text-stone-400 mb-3" />
               <span className="font-medium text-stone-700">Manual Document</span>
-            </button>
-            <button onClick={() => setAddType('asset')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
-              <Armchair size={32} className="text-amber-500 mb-3" />
-              <span className="font-medium text-stone-700">New Asset</span>
-            </button>
-            <button onClick={() => setAddType('bill')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
-              <CreditCard size={32} className="text-rose-500 mb-3" />
-              <span className="font-medium text-stone-700">Log Expense</span>
-            </button>
-            <button onClick={() => setAddType('health')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
-              <HeartPulse size={32} className="text-purple-500 mb-3" />
-              <span className="font-medium text-stone-700">Health Record</span>
+              <MapPin size={32} className="text-green-500 mb-3" />
+              <span className="font-medium text-stone-700">Add Property</span>
             </button>
           </div>
-        )
+        );
     }
-  }
+  };
 
   return (
-    <div className="flex h-screen bg-stone-50 font-sans text-stone-900 overflow-hidden">
-
-      <aside className="hidden md:flex w-64 flex-col bg-white border-r border-stone-200 h-full">
-        <div className="p-6">
-          <button
-            onClick={() => { setActiveTab('dashboard'); setSearchQuery(''); setNotificationsOpen(false); }}
-            className="text-xl font-bold tracking-tight text-stone-800 flex items-center gap-3 hover:opacity-80 transition-opacity"
-          >
-            <img src="/logo.png" alt="Hearth" className="w-8 h-8 object-contain" />
-            Hearth
-          </button>
+    <div className="min-h-screen bg-stone-50 font-sans text-stone-900 flex">
+      {/* Sidebar */}
+      <aside className="w-20 lg:w-64 bg-white border-r border-stone-200 flex flex-col fixed h-full z-20 transition-all duration-300">
+        <div className="p-6 flex items-center gap-3">
+          <div className="w-8 h-8 bg-stone-900 rounded-lg flex items-center justify-center text-white font-serif font-bold text-xl">H</div>
+          <span className="font-serif text-xl font-bold tracking-tight hidden lg:block">Hearth</span>
         </div>
 
-        <nav className="flex-1 px-4 space-y-1">
-          {
-            [
-              { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
-              { id: 'vault', icon: Files, label: 'Vaults' },
-              { id: 'assets', icon: Armchair, label: 'Assets' },
-              { id: 'finance', icon: CreditCard, label: 'Finance' },
-              { id: 'wellness', icon: HeartPulse, label: 'Wellness' },
-            ].map((item) => (
-              <button
-                key={item.id}
-                onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center gap-3 px-4 py-3 text-sm font-medium rounded-xl transition-all ${activeTab === item.id
-                  ? 'bg-stone-100 text-stone-900'
-                  : 'text-stone-500 hover:bg-stone-50 hover:text-stone-700'
-                  }`}
-              >
-                <item.icon size={18} strokeWidth={2} className={activeTab === item.id ? 'text-teal-600' : ''} />
-                {item.label}
-              </button>
-            ))
-          }
-        </nav >
+        <nav className="flex-1 px-4 space-y-2 mt-6">
+          {[
+            { id: 'dashboard', icon: LayoutDashboard, label: 'Overview' },
+            { id: 'vault', icon: Files, label: 'Vault' },
+            { id: 'assets', icon: Armchair, label: 'Assets' },
+            { id: 'finance', icon: CreditCard, label: 'Finance' },
+            { id: 'wellness', icon: HeartPulse, label: 'Wellness' },
+            { id: 'vehicles', icon: Plane, label: 'Vehicles' },
+            { id: 'properties', icon: MapPin, label: 'Properties' },
+          ].map(item => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id)}
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all duration-200 group ${activeTab === item.id ? 'bg-stone-900 text-white shadow-md' : 'text-stone-500 hover:bg-stone-50 hover:text-stone-900'}`}
+            >
+              <item.icon size={20} className={activeTab === item.id ? 'text-white' : 'text-stone-400 group-hover:text-stone-900'} />
+              <span className="font-medium text-sm hidden lg:block">{item.label}</span>
+            </button>
+          ))}
+        </nav>
 
-        <div className="p-4 border-t border-stone-100 space-y-2">
-          <button
-            onClick={() => setSOSOpen(true)}
-            className="w-full flex items-center justify-center gap-2 bg-rose-50 text-rose-600 hover:bg-rose-100 hover:text-rose-700 px-4 py-3 rounded-xl text-sm font-bold transition-colors"
-          >
-            <Siren size={18} /> Emergency SOS
-          </button>
-          <button onClick={logout} className="w-full flex items-center justify-center gap-2 text-stone-500 hover:text-stone-800 px-4 py-2 text-xs">
-            <LogOut size={14} /> Sign Out
+        <div className="p-4 border-t border-stone-100">
+          <button onClick={logout} className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-stone-400 hover:bg-rose-50 hover:text-rose-600 transition-colors">
+            <LogOut size={20} />
+            <span className="font-medium text-sm hidden lg:block">Sign Out</span>
           </button>
         </div>
+      </aside>
 
-        <div className="px-6 pb-6 mt-auto">
-          <h4 className="text-xs font-semibold text-stone-400 uppercase tracking-wider mb-3">Household</h4>
-          <div className="space-y-2">
-            {data.users.filter(u => u.id !== 'family').map(u => (
-              <div key={u.id} className="flex items-center gap-2 text-sm text-stone-600">
-                <span className="text-lg">{u.avatar}</span>
-                <span>{u.name}</span>
-                {u.id === currentUser._id && <span className="text-[10px] bg-stone-100 px-1.5 py-0.5 rounded text-stone-400">You</span>}
-              </div>
-            ))}
+      {/* Main Content */}
+      <main className="flex-1 ml-20 lg:ml-64 p-4 lg:p-8 overflow-y-auto h-screen">
+        {/* Header */}
+        <header className="flex justify-between items-center mb-8">
+          <div>
+            <h1 className="text-2xl font-serif font-bold text-stone-800 capitalize">{activeTab}</h1>
+            <p className="text-stone-500 text-sm">{data.householdName}</p>
           </div>
-        </div>
-      </aside >
 
-      <main className="flex-1 flex flex-col h-full overflow-hidden relative">
-        <header className="h-16 flex items-center justify-between px-6 bg-white/80 backdrop-blur-md border-b border-stone-200 z-10 sticky top-0">
-          <div className="relative w-full max-w-md hidden sm:block">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-xs font-medium text-stone-400 uppercase tracking-widest">{data.householdName}</span>
-            </div>
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" size={16} />
+          <div className="flex items-center gap-4">
+            <div className="relative hidden md:block">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-stone-400" size={18} />
               <input
                 type="text"
-                placeholder="Search documents, warranties, bills (Cmd+K)..."
-                className="w-full pl-10 pr-4 py-2 bg-stone-100 border-none rounded-xl text-sm focus:ring-2 focus:ring-teal-500/20 focus:bg-white transition-all"
+                placeholder="Search anything..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-10 pr-4 py-2 bg-white border border-stone-200 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-stone-900/10 w-64 transition-all focus:w-80"
               />
             </div>
 
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="hidden md:flex items-center gap-2 bg-stone-100 rounded-full px-3 py-1">
-              <span className="text-xs text-stone-500 font-medium">Size</span>
-              <input
-                type="range"
-                min="0.75"
-                max="1.25"
-                step="0.05"
-                value={zoomLevel}
-                onChange={(e) => setZoomLevel(parseFloat(e.target.value))}
-                className="w-20 h-1 bg-stone-300 rounded-lg appearance-none cursor-pointer accent-stone-800"
-              />
-            </div>
             <button
               onClick={() => setNotificationsOpen(!isNotificationsOpen)}
-              className={`relative p-2 transition-colors ${isNotificationsOpen ? 'text-stone-800 bg-stone-100 rounded-full' : 'text-stone-400 hover:text-stone-600'}`}
+              className="relative p-2 bg-white border border-stone-200 rounded-full text-stone-500 hover:text-stone-900 transition-colors"
             >
               <Bell size={20} />
-              {urgentItems.length > 0 && <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border border-white"></span>}
+              {urgentItems.length > 0 && (
+                <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white"></span>
+              )}
+
+              {isNotificationsOpen && (
+                <div className="absolute top-full right-0 mt-2 w-80 bg-white rounded-xl shadow-xl border border-stone-100 z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                  <div className="p-3 border-b border-stone-100 bg-stone-50">
+                    <h4 className="font-semibold text-stone-700 text-sm">Notifications</h4>
+                  </div>
+                  <div className="max-h-[300px] overflow-y-auto">
+                    {urgentItems.length > 0 ? (
+                      urgentItems.map((item, i) => (
+                        <div
+                          key={i}
+                          onClick={() => {
+                            setActiveTab(item.type === 'bill' ? 'finance' : 'assets');
+                            setNotificationsOpen(false);
+                          }}
+                          className="p-3 border-b border-stone-50 hover:bg-stone-50 cursor-pointer transition-colors flex items-start gap-3"
+                        >
+                          <div className={`p-2 rounded-full shrink-0 ${item.type === 'bill' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'}`}>
+                            {item.type === 'bill' ? <CreditCard size={16} /> : <ShieldCheck size={16} />}
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-stone-800">{item.title}</p>
+                            <p className="text-xs text-stone-500">{item.msg}</p>
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-8 text-center text-stone-400">
+                        <Bell size={24} className="mx-auto mb-2 opacity-20" />
+                        <p className="text-xs">No new notifications</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </button>
+
+            <div className="flex items-center gap-3 pl-4 border-l border-stone-200">
+              <div className="text-right hidden sm:block">
+                <p className="text-sm font-medium text-stone-800">{currentUser?.name}</p>
+                <p className="text-xs text-stone-500 capitalize">{currentUser?.role}</p>
+              </div>
+              <div className="w-10 h-10 bg-stone-200 rounded-full overflow-hidden border-2 border-white shadow-sm">
+                <div className="w-full h-full flex items-center justify-center bg-stone-800 text-white font-medium">
+                  {currentUser?.name?.charAt(0)}
+                </div>
+              </div>
+            </div>
           </div>
+        </header>
 
-          {isNotificationsOpen && (
-            <>
-              <div className="fixed inset-0 z-40" onClick={() => setNotificationsOpen(false)}></div>
-              <div className="absolute top-16 right-6 w-80 bg-white rounded-xl shadow-xl border border-stone-100 z-50 overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200">
-                <div className="p-4 border-b border-stone-100 flex justify-between items-center bg-stone-50/50">
-                  <h3 className="font-semibold text-stone-800 text-sm">Notifications</h3>
-                  <span className="text-xs text-stone-400">{urgentItems.length} New</span>
-                </div>
-                <div className="max-h-[calc(100vh-200px)] overflow-y-auto">
-                  {urgentItems.length > 0 ? (
-                    urgentItems.map((item, i) => (
-                      <div
-                        key={i}
-                        onClick={() => {
-                          setActiveTab(item.type === 'bill' ? 'finance' : 'assets');
-                          setNotificationsOpen(false);
-                        }}
-                        className="p-4 border-b border-stone-50 hover:bg-stone-50 transition-colors flex gap-3 cursor-pointer"
-                      >
-                        <div className={`mt-1 p-1.5 rounded-full shrink-0 ${item.type === 'bill' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'}`}>
-                          {item.type === 'bill' ? <CreditCard size={14} /> : <ShieldCheck size={14} />}
+        {searchQuery && showSearchOverlay ? (
+          <div className="space-y-8 animate-in fade-in duration-300 p-6">
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-serif text-stone-800">Search Results for "{searchQuery}"</h2>
+              <button onClick={() => setShowSearchOverlay(false)} className="text-sm text-stone-500 hover:text-stone-800 underline">
+                Close Search
+              </button>
+            </div>
+
+            {filteredDocs.length > 0 && (
+              <div>
+                <h3 className="font-semibold text-stone-700 mb-3 flex items-center gap-2">
+                  <Files size={18} className="text-teal-600" /> Documents ({filteredDocs.length})
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {filteredDocs.map(doc => (
+                    <div
+                      key={doc.id}
+                      onClick={() => { setActiveTab('vault'); setShowSearchOverlay(false); }}
+                      className="bg-white rounded-xl border border-stone-200 p-4 hover:shadow-md transition-all cursor-pointer group hover:border-teal-500/30"
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="p-1.5 bg-stone-50 rounded-lg text-stone-400 group-hover:text-teal-600 transition-colors">
+                          <Files size={16} />
                         </div>
+                        <span className="text-[10px] uppercase tracking-wider text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded-md">{doc.type}</span>
+                      </div>
+                      <h4 className="font-medium text-stone-800 mb-1">{doc.title}</h4>
+                      {doc.expiry && <p className="text-xs text-stone-400">Expires: {doc.expiry}</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {filteredAssets.length > 0 && (
+              <div>
+                <h3 className="font-semibold text-stone-700 mb-3 flex items-center gap-2">
+                  <Armchair size={18} className="text-amber-600" /> Assets ({filteredAssets.length})
+                </h3>
+                <div className="grid grid-cols-1 gap-4">
+                  {filteredAssets.map(asset => (
+                    <div
+                      key={asset.id}
+                      onClick={() => { setActiveTab('assets'); setShowSearchOverlay(false); }}
+                      className="bg-white rounded-xl border border-stone-200 p-4 flex justify-between items-center cursor-pointer hover:shadow-md transition-all hover:border-amber-500/30 group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-amber-50 text-amber-600 rounded-lg group-hover:scale-110 transition-transform"><Armchair size={18} /></div>
                         <div>
-                          <p className="text-sm font-medium text-stone-800">{item.title}</p>
-                          <p className="text-xs text-stone-500 mt-0.5">{item.msg}</p>
+                          <span className="font-medium text-stone-800 block">{asset.title}</span>
+                          <span className="text-xs text-stone-500">Purchased: {asset.purchaseDate}</span>
                         </div>
                       </div>
-                    ))
-                  ) : (
-                    <div className="p-8 text-center text-stone-400">
-                      <Bell size={24} className="mx-auto mb-2 opacity-20" />
-                      <p className="text-sm">No new notifications</p>
+                      <span className="text-xs font-medium bg-stone-100 text-stone-600 px-2 py-1 rounded-lg">View Details</span>
                     </div>
-                  )}
+                  ))}
                 </div>
               </div>
-            </>
-          )}
-        </header >
+            )}
 
-        {
-          searchQuery && showSearchOverlay ? (
-            <div className="space-y-8 animate-in fade-in duration-300 p-6" >
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-serif text-stone-800">Search Results for "{searchQuery}"</h2>
-                <button onClick={() => setShowSearchOverlay(false)} className="text-sm text-stone-500 hover:text-stone-800 underline">
-                  Close Search
-                </button>
-              </div>
-
-              {filteredDocs.length > 0 && (
-                <div>
-                  <h3 className="font-semibold text-stone-700 mb-3 flex items-center gap-2">
-                    <Files size={18} className="text-teal-600" /> Documents ({filteredDocs.length})
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {filteredDocs.map(doc => (
-                      <div
-                        key={doc.id}
-                        onClick={() => { setActiveTab('vault'); setShowSearchOverlay(false); }}
-                        className="bg-white rounded-xl border border-stone-200 p-4 hover:shadow-md transition-all cursor-pointer group hover:border-teal-500/30"
-                      >
-                        <div className="flex justify-between items-start mb-2">
-                          <div className="p-1.5 bg-stone-50 rounded-lg text-stone-400 group-hover:text-teal-600 transition-colors">
-                            <Files size={16} />
-                          </div>
-                          <span className="text-[10px] uppercase tracking-wider text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded-md">{doc.type}</span>
+            {filteredBills.length > 0 && (
+              <div>
+                <h3 className="font-semibold text-stone-700 mb-3 flex items-center gap-2">
+                  <CreditCard size={18} className="text-rose-600" /> Bills ({filteredBills.length})
+                </h3>
+                <div className="space-y-2">
+                  {filteredBills.map(bill => (
+                    <div
+                      key={bill.id}
+                      onClick={() => { setActiveTab('finance'); setShowSearchOverlay(false); }}
+                      className="bg-white rounded-xl border border-stone-200 p-4 flex justify-between items-center cursor-pointer hover:shadow-md transition-all hover:border-rose-500/30 group"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="p-2 bg-rose-50 text-rose-600 rounded-lg group-hover:scale-110 transition-transform"><CreditCard size={18} /></div>
+                        <div>
+                          <span className="font-medium text-stone-800 block">{bill.title}</span>
+                          <span className={`text-xs ${isPast(parseISO(bill.dueDate)) ? 'text-rose-500' : 'text-stone-500'}`}>Due: {bill.dueDate}</span>
                         </div>
-                        <h4 className="font-medium text-stone-800 mb-1">{doc.title}</h4>
-                        {doc.expiry && <p className="text-xs text-stone-400">Expires: {doc.expiry}</p>}
                       </div>
-                    ))}
-                  </div>
+                      <span className="font-mono text-sm font-bold text-stone-700">₹{bill.amount.toLocaleString()}</span>
+                    </div>
+                  ))}
                 </div>
-              )
-              }
+              </div>
+            )}
 
-              {
-                filteredAssets.length > 0 && (
-                  <div>
-                    <h3 className="font-semibold text-stone-700 mb-3 flex items-center gap-2">
-                      <Armchair size={18} className="text-amber-600" /> Assets ({filteredAssets.length})
-                    </h3>
-                    <div className="grid grid-cols-1 gap-4">
-                      {filteredAssets.map(asset => (
-                        <div
-                          key={asset.id}
-                          onClick={() => { setActiveTab('assets'); setShowSearchOverlay(false); }}
-                          className="bg-white rounded-xl border border-stone-200 p-4 flex justify-between items-center cursor-pointer hover:shadow-md transition-all hover:border-amber-500/30 group"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-amber-50 text-amber-600 rounded-lg group-hover:scale-110 transition-transform"><Armchair size={18} /></div>
-                            <div>
-                              <span className="font-medium text-stone-800 block">{asset.title}</span>
-                              <span className="text-xs text-stone-500">Purchased: {asset.purchaseDate}</span>
-                            </div>
-                          </div>
-                          <span className="text-xs font-medium bg-stone-100 text-stone-600 px-2 py-1 rounded-lg">View Details</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )
-              }
-
-              {
-                filteredBills.length > 0 && (
-                  <div>
-                    <h3 className="font-semibold text-stone-700 mb-3 flex items-center gap-2">
-                      <CreditCard size={18} className="text-rose-600" /> Bills ({filteredBills.length})
-                    </h3>
-                    <div className="space-y-2">
-                      {filteredBills.map(bill => (
-                        <div
-                          key={bill.id}
-                          onClick={() => { setActiveTab('finance'); setShowSearchOverlay(false); }}
-                          className="bg-white rounded-xl border border-stone-200 p-4 flex justify-between items-center cursor-pointer hover:shadow-md transition-all hover:border-rose-500/30 group"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-rose-50 text-rose-600 rounded-lg group-hover:scale-110 transition-transform"><CreditCard size={18} /></div>
-                            <div>
-                              <span className="font-medium text-stone-800 block">{bill.title}</span>
-                              <span className={`text-xs ${isPast(parseISO(bill.dueDate)) ? 'text-rose-500' : 'text-stone-500'}`}>Due: {bill.dueDate}</span>
-                            </div>
-                          </div>
-                          <span className="font-mono text-sm font-bold text-stone-700">₹{bill.amount.toLocaleString()}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )
-              }
-
-              {
-                filteredDocs.length === 0 && filteredAssets.length === 0 && filteredBills.length === 0 && (
-                  <div className="text-center py-12 text-stone-400">
-                    <Search size={48} className="mx-auto mb-4 opacity-20" />
-                    <p>No results found</p>
-                  </div>
-                )
-              }
-            </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto p-6 pb-24">
-              {activeTab === 'dashboard' && renderDashboard()}
-              {activeTab === 'vault' && renderVault()}
-              {activeTab === 'assets' && renderAssets()}
-              {activeTab === 'finance' && renderFinance()}
-              {activeTab === 'wellness' && renderWellness()}
-            </div>
-          )
-        }
+            {filteredDocs.length === 0 && filteredAssets.length === 0 && filteredBills.length === 0 && (
+              <div className="text-center py-12 text-stone-400">
+                <Search size={48} className="mx-auto mb-4 opacity-20" />
+                <p>No results found</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-6 pb-24">
+            {activeTab === 'dashboard' && renderDashboard()}
+            {activeTab === 'vault' && renderVault()}
+            {activeTab === 'assets' && renderAssets()}
+            {activeTab === 'finance' && renderFinance()}
+            {activeTab === 'wellness' && renderWellness()}
+            {activeTab === 'vehicles' && renderVehicles()}
+            {activeTab === 'properties' && renderProperties()}
+          </div>
+        )}
 
         <div className="md:hidden bg-white border-t border-stone-200 p-4 flex justify-around shrink-0 z-20">
           {[
@@ -1149,6 +1339,36 @@ export default function Dashboard() {
             <h4 className="text-xs uppercase tracking-widest text-stone-400 mb-1">Health Insurance Policy</h4>
             <p className="font-mono text-lg">{data.emergency.insurance || 'Not Set'}</p>
           </div>
+        </div>
+      </Modal>
+
+      <Modal isOpen={isInviteModalOpen} onClose={() => setInviteModalOpen(false)} title="Invite Family Member">
+        <div className="text-center space-y-6 py-4">
+          <div className="w-16 h-16 bg-teal-50 text-teal-600 rounded-full flex items-center justify-center mx-auto">
+            <Users size={32} />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-stone-800">Share this Code</h3>
+            <p className="text-stone-500 text-sm">Share this code with your family member to let them join your household.</p>
+          </div>
+
+          <div className="bg-stone-100 p-4 rounded-xl border border-stone-200">
+            <p className="font-mono text-3xl font-bold text-stone-800 tracking-widest">{inviteCode}</p>
+          </div>
+
+          <p className="text-xs text-stone-400">
+            Expires on {inviteExpires && format(new Date(inviteExpires), 'PP p')}
+          </p>
+
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(inviteCode);
+              alert('Code copied to clipboard!');
+            }}
+            className="w-full bg-stone-900 text-white py-2.5 rounded-xl font-medium hover:bg-stone-800 transition-colors"
+          >
+            Copy Code
+          </button>
         </div>
       </Modal>
 

@@ -8,6 +8,19 @@ const Asset = require('../models/Asset');
 const Bill = require('../models/Bill');
 const Health = require('../models/Health');
 const EmergencyContact = require('../models/EmergencyContact');
+const Vehicle = require('../models/Vehicle');
+const Property = require('../models/Property');
+const Subscription = require('../models/Subscription');
+const Invitation = require('../models/Invitation');
+const crypto = require('crypto');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+
+const generateToken = (id) => {
+    return jwt.sign({ id }, process.env.JWT_SECRET, {
+        expiresIn: '30d',
+    });
+};
 
 // Get all data for the dashboard
 router.get('/data', protect, async (req, res) => {
@@ -54,6 +67,24 @@ router.get('/data', protect, async (req, res) => {
 
         const contacts = await EmergencyContact.find({ householdId });
 
+        const vehicles = await Vehicle.find({ householdId });
+        const formattedVehicles = vehicles.map(v => ({
+            ...v._doc,
+            id: v._id.toString()
+        }));
+
+        const properties = await Property.find({ householdId });
+        const formattedProperties = properties.map(p => ({
+            ...p._doc,
+            id: p._id.toString()
+        }));
+
+        const subscriptions = await Subscription.find({ householdId });
+        const formattedSubscriptions = subscriptions.map(s => ({
+            ...s._doc,
+            id: s._id.toString()
+        }));
+
         // We need insurance info. Let's assume it's stored as a document or a setting.
         // For now, I'll hardcode or maybe store it in Household model.
         // I will return a placeholder or fetch a specific doc tagged 'insurance'
@@ -70,7 +101,10 @@ router.get('/data', protect, async (req, res) => {
             emergency: {
                 contacts,
                 insurance
-            }
+            },
+            vehicles: formattedVehicles,
+            properties: formattedProperties,
+            subscriptions: formattedSubscriptions
         });
 
     } catch (error) {
@@ -169,6 +203,85 @@ router.delete('/health/:id', protect, async (req, res) => {
     }
 });
 
+// --- Vehicles ---
+router.post('/vehicles', protect, async (req, res) => {
+    try {
+        const vehicle = await Vehicle.create({
+            ...req.body,
+            householdId: req.user.household
+        });
+        res.status(201).json(vehicle);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+router.delete('/vehicles/:id', protect, async (req, res) => {
+    try {
+        await Vehicle.findOneAndDelete({ _id: req.params.id, householdId: req.user.household });
+        res.json({ message: 'Vehicle removed' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// --- Properties ---
+router.post('/properties', protect, async (req, res) => {
+    try {
+        const property = await Property.create({
+            ...req.body,
+            householdId: req.user.household
+        });
+        res.status(201).json(property);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+router.delete('/properties/:id', protect, async (req, res) => {
+    try {
+        await Property.findOneAndDelete({ _id: req.params.id, householdId: req.user.household });
+        res.json({ message: 'Property removed' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
+// --- Subscriptions ---
+router.post('/subscriptions', protect, async (req, res) => {
+    try {
+        const subscription = await Subscription.create({
+            ...req.body,
+            householdId: req.user.household
+        });
+        res.status(201).json(subscription);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+router.put('/subscriptions/:id', protect, async (req, res) => {
+    try {
+        const subscription = await Subscription.findOneAndUpdate(
+            { _id: req.params.id, householdId: req.user.household },
+            req.body,
+            { new: true }
+        );
+        res.json(subscription);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+router.delete('/subscriptions/:id', protect, async (req, res) => {
+    try {
+        await Subscription.findOneAndDelete({ _id: req.params.id, householdId: req.user.household });
+        res.json({ message: 'Subscription removed' });
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
+
 // --- Search ---
 router.get('/search', protect, async (req, res) => {
     const query = req.query.q;
@@ -181,12 +294,18 @@ router.get('/search', protect, async (req, res) => {
         const docs = await Document.find({ householdId, title: regex });
         const assets = await Asset.find({ householdId, title: regex });
         const bills = await Bill.find({ householdId, title: regex });
+        const vehicles = await Vehicle.find({ householdId, number: regex });
+        const properties = await Property.find({ householdId, name: regex });
+        const subscriptions = await Subscription.find({ householdId, name: regex });
 
         // Combine results
         const results = [
             ...docs.map(d => ({ ...d._doc, kind: 'document' })),
             ...assets.map(a => ({ ...a._doc, kind: 'asset' })),
-            ...bills.map(b => ({ ...b._doc, kind: 'bill' }))
+            ...bills.map(b => ({ ...b._doc, kind: 'bill' })),
+            ...vehicles.map(v => ({ ...v._doc, kind: 'vehicle', title: v.number })),
+            ...properties.map(p => ({ ...p._doc, kind: 'property', title: p.name })),
+            ...subscriptions.map(s => ({ ...s._doc, kind: 'subscription', title: s.name }))
         ];
 
         res.json(results);
@@ -195,5 +314,81 @@ router.get('/search', protect, async (req, res) => {
     }
 });
 
+
+// --- Invitations ---
+router.post('/invitations', protect, async (req, res) => {
+    try {
+        // Generate a random 6-character code
+        const code = crypto.randomBytes(3).toString('hex').toUpperCase();
+
+        const invitation = await Invitation.create({
+            code,
+            householdId: req.user.household,
+            inviterId: req.user._id,
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000) // Expires in 24 hours
+        });
+
+        res.status(201).json({ code: invitation.code, expiresAt: invitation.expiresAt });
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
+// --- Join with Invite ---
+router.post('/join-invite', async (req, res) => {
+    const { inviteCode, username, password, name } = req.body;
+
+    try {
+        const invitation = await Invitation.findOne({ code: inviteCode, status: 'pending' });
+
+        if (!invitation) {
+            return res.status(400).json({ message: 'Invalid or expired invite code' });
+        }
+
+        if (new Date() > invitation.expiresAt) {
+            invitation.status = 'expired';
+            await invitation.save();
+            return res.status(400).json({ message: 'Invite code has expired' });
+        }
+
+        // Check if user exists
+        const userExists = await User.findOne({ username });
+        if (userExists) {
+            return res.status(400).json({ message: 'Username already exists' });
+        }
+
+        // Hash password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(password, salt);
+
+        // Create user
+        const user = await User.create({
+            name,
+            username,
+            password: hashedPassword,
+            household: invitation.householdId,
+            role: 'member',
+            avatar: '👤'
+        });
+
+        // Mark invite as used (optional, or keep reusable until expiry?)
+        // Let's keep it reusable for multiple family members until expiry for now, 
+        // or maybe we want one-time use? The user didn't specify. 
+        // Usually family invites are shared in a group chat, so reusable is better.
+        // But for security, maybe one-time? Let's stick to reusable for 24h for simplicity.
+
+        res.status(201).json({
+            _id: user._id,
+            name: user.name,
+            username: user.username,
+            role: user.role,
+            household: user.household,
+            token: generateToken(user._id),
+        });
+
+    } catch (error) {
+        res.status(500).json({ message: error.message });
+    }
+});
 
 module.exports = router;

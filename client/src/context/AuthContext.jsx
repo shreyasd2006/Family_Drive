@@ -27,25 +27,36 @@ export const AuthProvider = ({ children }) => {
   };
 
   const registerHousehold = async (data) => {
-      try {
-          const res = await api.post('/auth/register-household', data);
-          setUser(res.data);
-          localStorage.setItem('user', JSON.stringify(res.data));
-          return { success: true };
-      } catch (error) {
-          return { success: false, message: error.response?.data?.message || 'Registration failed' };
-      }
+    try {
+      const res = await api.post('/auth/register-household', data);
+      setUser(res.data);
+      localStorage.setItem('user', JSON.stringify(res.data));
+      return { success: true };
+    } catch (error) {
+      return { success: false, message: error.response?.data?.message || 'Registration failed' };
+    }
   };
 
   const joinHousehold = async (data) => {
-      try {
-          const res = await api.post('/auth/join-household', data);
-          setUser(res.data);
-          localStorage.setItem('user', JSON.stringify(res.data));
-          return { success: true };
-      } catch (error) {
-          return { success: false, message: error.response?.data?.message || 'Join failed' };
-      }
+    try {
+      const res = await api.post('/auth/join-household', data);
+      setUser(res.data);
+      localStorage.setItem('user', JSON.stringify(res.data));
+      return { success: true };
+    } catch (error) {
+      return { success: false, message: error.response?.data?.message || 'Join failed' };
+    }
+  };
+
+  const joinWithInvite = async (data) => {
+    try {
+      const res = await api.post('/join-invite', data);
+      setUser(res.data);
+      localStorage.setItem('user', JSON.stringify(res.data));
+      return { success: true };
+    } catch (error) {
+      return { success: false, message: error.response?.data?.message || 'Join failed' };
+    }
   };
 
   const logout = () => {
@@ -54,7 +65,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, registerHousehold, joinHousehold, loading }}>
+    <AuthContext.Provider value={{ user, login, logout, registerHousehold, joinHousehold, joinWithInvite, loading }}>
       {children}
     </AuthContext.Provider>
   );
