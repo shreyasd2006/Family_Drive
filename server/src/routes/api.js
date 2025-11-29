@@ -117,6 +117,11 @@ router.get('/data', protect, async (req, res) => {
 // --- Documents ---
 router.post('/documents', protect, async (req, res) => {
     try {
+        if (req.body.secure && req.body.number) {
+            const salt = await bcrypt.genSalt(10);
+            req.body.number = await bcrypt.hash(req.body.number, salt);
+        }
+
         const doc = await Document.create({
             ...req.body,
             householdId: req.user.household,
