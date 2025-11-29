@@ -142,6 +142,23 @@ router.delete('/documents/:id', protect, async (req, res) => {
     }
 });
 
+router.put('/documents/:id', protect, async (req, res) => {
+    try {
+        if (req.body.secure && req.body.number && !req.body.number.startsWith('$2a$')) {
+            const salt = await bcrypt.genSalt(10);
+            req.body.number = await bcrypt.hash(req.body.number, salt);
+        }
+        const doc = await Document.findOneAndUpdate(
+            { _id: req.params.id, householdId: req.user.household },
+            req.body,
+            { new: true }
+        );
+        res.json(doc);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
 // --- Assets ---
 router.post('/assets', protect, async (req, res) => {
     try {
@@ -161,6 +178,19 @@ router.delete('/assets/:id', protect, async (req, res) => {
         res.json({ message: 'Asset removed' });
     } catch (error) {
         res.status(500).json({ message: error.message });
+    }
+});
+
+router.put('/assets/:id', protect, async (req, res) => {
+    try {
+        const asset = await Asset.findOneAndUpdate(
+            { _id: req.params.id, householdId: req.user.household },
+            req.body,
+            { new: true }
+        );
+        res.json(asset);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
     }
 });
 
@@ -186,6 +216,19 @@ router.delete('/bills/:id', protect, async (req, res) => {
     }
 });
 
+router.put('/bills/:id', protect, async (req, res) => {
+    try {
+        const bill = await Bill.findOneAndUpdate(
+            { _id: req.params.id, householdId: req.user.household },
+            req.body,
+            { new: true }
+        );
+        res.json(bill);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
 // --- Health ---
 router.post('/health', protect, async (req, res) => {
     try {
@@ -205,6 +248,19 @@ router.delete('/health/:id', protect, async (req, res) => {
         res.json({ message: 'Health record removed' });
     } catch (error) {
         res.status(500).json({ message: error.message });
+    }
+});
+
+router.put('/health/:id', protect, async (req, res) => {
+    try {
+        const health = await Health.findOneAndUpdate(
+            { _id: req.params.id, householdId: req.user.household },
+            req.body,
+            { new: true }
+        );
+        res.json(health);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
     }
 });
 
@@ -230,6 +286,19 @@ router.delete('/vehicles/:id', protect, async (req, res) => {
     }
 });
 
+router.put('/vehicles/:id', protect, async (req, res) => {
+    try {
+        const vehicle = await Vehicle.findOneAndUpdate(
+            { _id: req.params.id, householdId: req.user.household },
+            req.body,
+            { new: true }
+        );
+        res.json(vehicle);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
+    }
+});
+
 // --- Properties ---
 router.post('/properties', protect, async (req, res) => {
     try {
@@ -249,6 +318,19 @@ router.delete('/properties/:id', protect, async (req, res) => {
         res.json({ message: 'Property removed' });
     } catch (error) {
         res.status(500).json({ message: error.message });
+    }
+});
+
+router.put('/properties/:id', protect, async (req, res) => {
+    try {
+        const property = await Property.findOneAndUpdate(
+            { _id: req.params.id, householdId: req.user.household },
+            req.body,
+            { new: true }
+        );
+        res.json(property);
+    } catch (error) {
+        res.status(400).json({ message: error.message });
     }
 });
 

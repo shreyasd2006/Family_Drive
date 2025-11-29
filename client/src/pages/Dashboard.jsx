@@ -133,7 +133,7 @@ export default function Dashboard() {
       if (addType === 'property') endpoint = '/properties';
       if (addType === 'subscription') endpoint = '/subscriptions';
 
-      if (addType === 'subscription' && payload.id) {
+      if (payload.id) {
         await api.put(`${endpoint}/${payload.id}`, payload);
       } else {
         await api.post(endpoint, payload);
@@ -458,7 +458,14 @@ export default function Dashboard() {
                 <div className="flex gap-1">
                   {doc.tags.map(t => <span key={t} className="text-[10px] uppercase tracking-wider text-stone-400 bg-stone-50 px-1.5 py-0.5 rounded-md">{t}</span>)}
                 </div>
-                <button onClick={() => handleDelete('documents', doc.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={14} /></button>
+                <div className="flex gap-2">
+                  <button onClick={() => {
+                    setAddType('doc');
+                    setFormData(doc);
+                    setQuickAddOpen(true);
+                  }} className="text-stone-300 hover:text-teal-500"><div className="p-1 hover:bg-teal-50 rounded"><span className="text-lg">✎</span></div></button>
+                  <button onClick={() => handleDelete('documents', doc.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={14} /></button>
+                </div>
               </div>
 
               <h3 className="font-medium text-stone-800">{doc.title}</h3>
@@ -508,6 +515,11 @@ export default function Dashboard() {
                   </div>
                   <div className="flex items-center gap-2">
                     <StatusBadge type={daysLeft < 0 ? 'neutral' : daysLeft < 45 ? 'warning' : 'success'} text={daysLeft < 0 ? 'Warranty Expired' : `Warranty: ${daysLeft} days left`} />
+                    <button onClick={() => {
+                      setAddType('asset');
+                      setFormData(asset);
+                      setQuickAddOpen(true);
+                    }} className="text-stone-300 hover:text-teal-500 ml-2"><div className="p-1 hover:bg-teal-50 rounded"><span className="text-lg">✎</span></div></button>
                     <button onClick={() => handleDelete('assets', asset.id)} className="text-stone-300 hover:text-rose-500 ml-2"><Trash2 size={16} /></button>
                   </div>
                 </div>
@@ -559,7 +571,14 @@ export default function Dashboard() {
                 <div className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Plane size={20} /></div> {/* Using Plane as placeholder icon for Vehicle */}
                 <h3 className="font-semibold text-stone-800 text-lg">{vehicle.number}</h3>
               </div>
-              <button onClick={() => handleDelete('vehicles', vehicle.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={16} /></button>
+              <div className="flex gap-2">
+                <button onClick={() => {
+                  setAddType('vehicle');
+                  setFormData(vehicle);
+                  setQuickAddOpen(true);
+                }} className="text-stone-300 hover:text-teal-500"><div className="p-1 hover:bg-teal-50 rounded"><span className="text-lg">✎</span></div></button>
+                <button onClick={() => handleDelete('vehicles', vehicle.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={16} /></button>
+              </div>
             </div>
             <div className="space-y-2">
               {vehicle.customFields && vehicle.customFields.map((field, idx) => (
@@ -589,7 +608,14 @@ export default function Dashboard() {
                 <div className="p-2 bg-amber-50 text-amber-600 rounded-lg"><MapPin size={20} /></div>
                 <h3 className="font-semibold text-stone-800 text-lg">{property.name}</h3>
               </div>
-              <button onClick={() => handleDelete('properties', property.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={16} /></button>
+              <div className="flex gap-2">
+                <button onClick={() => {
+                  setAddType('property');
+                  setFormData(property);
+                  setQuickAddOpen(true);
+                }} className="text-stone-300 hover:text-teal-500"><div className="p-1 hover:bg-teal-50 rounded"><span className="text-lg">✎</span></div></button>
+                <button onClick={() => handleDelete('properties', property.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={16} /></button>
+              </div>
             </div>
             <div className="space-y-2">
               {property.customFields && property.customFields.map((field, idx) => (
@@ -659,7 +685,12 @@ export default function Dashboard() {
                       <span className="inline-flex items-center gap-1 text-xs text-stone-500 bg-stone-100 px-2 py-1 rounded-md"><User size={10} /> {data.users.find(u => u.id === bill.user)?.name || 'Personal'}</span>
                     )}
                   </td>
-                  <td className="px-6 py-4 text-right">
+                  <td className="px-6 py-4 text-right flex gap-2 justify-end">
+                    <button onClick={() => {
+                      setAddType('bill');
+                      setFormData(bill);
+                      setQuickAddOpen(true);
+                    }} className="text-stone-300 hover:text-teal-500"><div className="p-1 hover:bg-teal-50 rounded"><span className="text-lg">✎</span></div></button>
                     <button onClick={() => handleDelete('bills', bill.id)} className="text-stone-300 hover:text-rose-500"><Trash2 size={16} /></button>
                   </td>
                 </tr>
@@ -747,7 +778,14 @@ export default function Dashboard() {
                   <p className="text-xs font-medium text-teal-600">Next Due</p>
                   <p className="text-xs text-stone-600">{vac.nextDue}</p>
                 </div>
-                <button onClick={() => handleDelete('health', vac.id)} className="text-stone-300 hover:text-rose-500 ml-2"><Trash2 size={14} /></button>
+                <div className="flex items-center">
+                  <button onClick={() => {
+                    setAddType('health');
+                    setFormData({ ...vac, type: 'Vaccination' });
+                    setQuickAddOpen(true);
+                  }} className="text-stone-300 hover:text-teal-500 ml-2"><div className="p-1 hover:bg-teal-50 rounded"><span className="text-lg">✎</span></div></button>
+                  <button onClick={() => handleDelete('health', vac.id)} className="text-stone-300 hover:text-rose-500 ml-2"><Trash2 size={14} /></button>
+                </div>
               </div>
             ))}
           </div>
@@ -763,7 +801,14 @@ export default function Dashboard() {
                   <p className="text-xs text-stone-600 mt-1">{rx.dosage}</p>
                   <p className="text-[10px] text-stone-400 mt-2 italic">{rx.notes}</p>
                 </div>
-                <button onClick={() => handleDelete('health', rx.id)} className="text-stone-300 hover:text-rose-500 ml-2 h-fit"><Trash2 size={14} /></button>
+                <div className="flex items-center h-fit">
+                  <button onClick={() => {
+                    setAddType('health');
+                    setFormData({ ...rx, type: 'Prescription' });
+                    setQuickAddOpen(true);
+                  }} className="text-stone-300 hover:text-teal-500 ml-2"><div className="p-1 hover:bg-teal-50 rounded"><span className="text-lg">✎</span></div></button>
+                  <button onClick={() => handleDelete('health', rx.id)} className="text-stone-300 hover:text-rose-500 ml-2"><Trash2 size={14} /></button>
+                </div>
               </div>
             ))}
           </div>
@@ -1061,11 +1106,39 @@ export default function Dashboard() {
               </div>
             </button>
 
-            <button onClick={() => setAddType('doc')} className="flex flex-col items-center justify-center p-6 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
-              <Files size={32} className="text-stone-400 mb-3" />
-              <span className="font-medium text-stone-700">Manual Document</span>
-              <MapPin size={32} className="text-green-500 mb-3" />
-              <span className="font-medium text-stone-700">Add Property</span>
+            <button onClick={() => setAddType('doc')} className="flex flex-col items-center justify-center p-4 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
+              <Files size={24} className="text-stone-400 mb-2" />
+              <span className="font-medium text-stone-700 text-sm">Document</span>
+            </button>
+
+            <button onClick={() => setAddType('asset')} className="flex flex-col items-center justify-center p-4 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
+              <Armchair size={24} className="text-amber-500 mb-2" />
+              <span className="font-medium text-stone-700 text-sm">Asset</span>
+            </button>
+
+            <button onClick={() => setAddType('bill')} className="flex flex-col items-center justify-center p-4 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
+              <CreditCard size={24} className="text-rose-500 mb-2" />
+              <span className="font-medium text-stone-700 text-sm">Bill</span>
+            </button>
+
+            <button onClick={() => setAddType('health')} className="flex flex-col items-center justify-center p-4 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
+              <HeartPulse size={24} className="text-rose-400 mb-2" />
+              <span className="font-medium text-stone-700 text-sm">Health</span>
+            </button>
+
+            <button onClick={() => setAddType('vehicle')} className="flex flex-col items-center justify-center p-4 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
+              <Plane size={24} className="text-blue-500 mb-2" />
+              <span className="font-medium text-stone-700 text-sm">Vehicle</span>
+            </button>
+
+            <button onClick={() => setAddType('property')} className="flex flex-col items-center justify-center p-4 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
+              <MapPin size={24} className="text-green-500 mb-2" />
+              <span className="font-medium text-stone-700 text-sm">Property</span>
+            </button>
+
+            <button onClick={() => setAddType('subscription')} className="flex flex-col items-center justify-center p-4 bg-stone-50 rounded-xl hover:bg-stone-100 transition-colors border border-stone-200">
+              <RefreshCw size={24} className="text-purple-500 mb-2" />
+              <span className="font-medium text-stone-700 text-sm">Subscription</span>
             </button>
           </div>
         );
