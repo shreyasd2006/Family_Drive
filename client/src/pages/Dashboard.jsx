@@ -956,6 +956,30 @@ export default function Dashboard() {
             <input className="w-full p-2 border rounded" type="date" placeholder="Expiry" value={formData.expiry || ''} onChange={e => setFormData({ ...formData, expiry: e.target.value })} />
             <input className="w-full p-2 border rounded" placeholder="Location" value={formData.location || ''} onChange={e => setFormData({ ...formData, location: e.target.value })} />
             <input className="w-full p-2 border rounded" placeholder="Secure Number (optional)" value={formData.number || ''} onChange={e => setFormData({ ...formData, number: e.target.value, secure: true })} />
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-stone-500">Custom Fields</label>
+              {(formData.customFields || []).map((field, idx) => (
+                <div key={idx} className="flex gap-2">
+                  <input className="flex-1 p-2 border rounded text-sm" placeholder="Label" value={field.label} onChange={e => {
+                    const newFields = [...(formData.customFields || [])];
+                    newFields[idx].label = e.target.value;
+                    setFormData({ ...formData, customFields: newFields });
+                  }} />
+                  <input className="flex-1 p-2 border rounded text-sm" placeholder="Value" value={field.value} onChange={e => {
+                    const newFields = [...(formData.customFields || [])];
+                    newFields[idx].value = e.target.value;
+                    setFormData({ ...formData, customFields: newFields });
+                  }} />
+                  <button onClick={() => {
+                    const newFields = formData.customFields.filter((_, i) => i !== idx);
+                    setFormData({ ...formData, customFields: newFields });
+                  }} className="text-rose-500"><X size={16} /></button>
+                </div>
+              ))}
+              <button onClick={() => setFormData({ ...formData, customFields: [...(formData.customFields || []), { label: '', value: '' }] })} className="text-xs text-teal-600 font-medium">+ Add Field</button>
+            </div>
+
             <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Document</button>
           </div>
         );
@@ -968,6 +992,31 @@ export default function Dashboard() {
             <input className="w-full p-2 border rounded" type="date" value={formData.purchaseDate || ''} onChange={e => setFormData({ ...formData, purchaseDate: e.target.value })} />
             <label className="text-xs text-gray-500">Warranty Expiry</label>
             <input className="w-full p-2 border rounded" type="date" value={formData.warrantyExpiry || ''} onChange={e => setFormData({ ...formData, warrantyExpiry: e.target.value })} />
+            <input className="w-full p-2 border rounded" type="date" value={formData.warrantyExpiry || ''} onChange={e => setFormData({ ...formData, warrantyExpiry: e.target.value })} />
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-stone-500">Custom Fields</label>
+              {(formData.customFields || []).map((field, idx) => (
+                <div key={idx} className="flex gap-2">
+                  <input className="flex-1 p-2 border rounded text-sm" placeholder="Label" value={field.label} onChange={e => {
+                    const newFields = [...(formData.customFields || [])];
+                    newFields[idx].label = e.target.value;
+                    setFormData({ ...formData, customFields: newFields });
+                  }} />
+                  <input className="flex-1 p-2 border rounded text-sm" placeholder="Value" value={field.value} onChange={e => {
+                    const newFields = [...(formData.customFields || [])];
+                    newFields[idx].value = e.target.value;
+                    setFormData({ ...formData, customFields: newFields });
+                  }} />
+                  <button onClick={() => {
+                    const newFields = formData.customFields.filter((_, i) => i !== idx);
+                    setFormData({ ...formData, customFields: newFields });
+                  }} className="text-rose-500"><X size={16} /></button>
+                </div>
+              ))}
+              <button onClick={() => setFormData({ ...formData, customFields: [...(formData.customFields || []), { label: '', value: '' }] })} className="text-xs text-teal-600 font-medium">+ Add Field</button>
+            </div>
+
             <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Asset</button>
           </div>
         );
@@ -979,6 +1028,30 @@ export default function Dashboard() {
             <input className="w-full p-2 border rounded" type="number" placeholder="Amount" value={formData.amount || ''} onChange={e => setFormData({ ...formData, amount: e.target.value })} />
             <label className="text-xs text-gray-500">Due Date</label>
             <input className="w-full p-2 border rounded" type="date" value={formData.dueDate || ''} onChange={e => setFormData({ ...formData, dueDate: e.target.value })} />
+
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-stone-500">Custom Fields</label>
+              {(formData.customFields || []).map((field, idx) => (
+                <div key={idx} className="flex gap-2">
+                  <input className="flex-1 p-2 border rounded text-sm" placeholder="Label" value={field.label} onChange={e => {
+                    const newFields = [...(formData.customFields || [])];
+                    newFields[idx].label = e.target.value;
+                    setFormData({ ...formData, customFields: newFields });
+                  }} />
+                  <input className="flex-1 p-2 border rounded text-sm" placeholder="Value" value={field.value} onChange={e => {
+                    const newFields = [...(formData.customFields || [])];
+                    newFields[idx].value = e.target.value;
+                    setFormData({ ...formData, customFields: newFields });
+                  }} />
+                  <button onClick={() => {
+                    const newFields = formData.customFields.filter((_, i) => i !== idx);
+                    setFormData({ ...formData, customFields: newFields });
+                  }} className="text-rose-500"><X size={16} /></button>
+                </div>
+              ))}
+              <button onClick={() => setFormData({ ...formData, customFields: [...(formData.customFields || []), { label: '', value: '' }] })} className="text-xs text-teal-600 font-medium">+ Add Field</button>
+            </div>
+
             <button onClick={handleAddSubmit} className="w-full bg-stone-900 text-white p-2 rounded">Save Bill</button>
           </div>
         );

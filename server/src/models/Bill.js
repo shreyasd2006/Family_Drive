@@ -6,7 +6,8 @@ const billSchema = new mongoose.Schema({
   dueDate: { type: String, required: true },
   status: { type: String, enum: ['paid', 'pending', 'overdue'], default: 'pending' },
   user: { type: String, required: true }, // 'family' or ObjectId string
-  householdId: { type: mongoose.Schema.Types.ObjectId, ref: 'Household', required: true }
+  householdId: { type: mongoose.Schema.Types.ObjectId, ref: 'Household', required: true },
+  customFields: [{ label: String, value: String }]
 });
 
 module.exports = mongoose.model('Bill', billSchema);

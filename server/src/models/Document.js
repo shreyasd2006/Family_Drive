@@ -11,6 +11,7 @@ const documentSchema = new mongoose.Schema({
   secure: { type: Boolean, default: false },
   number: { type: String }, // For secure documents
   fileUrl: { type: String },
+  customFields: [{ label: String, value: String }],
   createdAt: { type: Date, default: Date.now }
 });
 

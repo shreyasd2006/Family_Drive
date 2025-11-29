@@ -10,7 +10,8 @@ const assetSchema = new mongoose.Schema({
     note: { type: String }
   }],
   userId: { type: String, required: true },
-  householdId: { type: mongoose.Schema.Types.ObjectId, ref: 'Household', required: true }
+  householdId: { type: mongoose.Schema.Types.ObjectId, ref: 'Household', required: true },
+  customFields: [{ label: String, value: String }]
 });
 
 module.exports = mongoose.model('Asset', assetSchema);
